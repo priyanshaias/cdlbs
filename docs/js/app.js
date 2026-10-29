@@ -591,7 +591,7 @@
 
   /* ------------------------------------------------------------ admin: users */
   let usersData = null;
-  const usersUi = { filter: 'all', open: '' };
+  const usersUi = { filter: 'everyone', open: '' };
   async function loadUsers() { usersData = await S.api.call('users'); }
   function usersPage() {
     const by = {}; usersData.rows.forEach(u => (by[u.division] = by[u.division] || []).push(u));
@@ -605,7 +605,9 @@
         <div class="kpi"><div class="v num">${usersData.rows.filter(u => u.status === 'Active').length}</div><div class="l">Active users</div></div>
         <div class="kpi"><div class="v num" style="color:var(--warn-ink)">${none.length}</div><div class="l">Divisions with no user</div></div>
         <div class="kpi"><div class="v num">${many.length}</div><div class="l">Divisions with more than 1</div></div></div>
-      <div class="chips">${chip('all', 'All divisions', ds.length)}${chip('none', 'No user yet', none.length)}${chip('many', 'More than 1', many.length)}</div>
+      ${accountsCard()}
+      <div class="chips">${chip('everyone', 'Every division user', usersData.rows.length)}${chip('all', 'By division', ds.length)}${chip('none', 'No user yet', none.length)}${chip('many', 'More than 1', many.length)}</div>
+      ${usersUi.filter === 'everyone' ? everyoneCard() : `
       <div class="card"><div style="overflow-x:auto"><table class="plain users"><thead><tr><th>Division</th><th>Users</th><th>Who</th></tr></thead><tbody>
       ${show.map(d => {
         const list = by[d.division] || [], n = act(d.division), open = usersUi.open === d.division;
@@ -617,7 +619,29 @@
               <div class="faint">${esc(u.email)} · ${esc(u.phone)} · signed up ${esc(u.on)} · last sign-in ${esc(u.last || '—')}</div></div>
             <div class="row" style="flex-wrap:nowrap">${u.status === 'Active' ? `<button class="btn sm danger" data-act="u-status" data-v="off" data-email="${esc(u.email)}">Disable</button>` : `<button class="btn sm" data-act="u-status" data-v="on" data-email="${esc(u.email)}">Enable</button>`}
               <button class="btn sm" data-act="u-pass" data-email="${esc(u.email)}">Set a new password</button></div></div></td></tr>`).join('') : ''}`;
-      }).join('')}</tbody></table></div></div>`;
+      }).join('')}</tbody></table></div></div>`}`;
+  }
+  // admins and shared accounts from Config.local.gs: not tied to a division, changed only in that file
+  function accountsCard() {
+    const list = usersData.accounts || [];
+    if (!list.length) return '';
+    return `<div class="card" style="margin-bottom:16px"><h2>Admin and shared accounts</h2>
+      <p class="faint" style="margin:2px 0 10px">Kept in Config.local.gs in Apps Script, the same as UPMC and FV. To change a password, run makeHash there.</p>
+      <div style="overflow-x:auto"><table class="plain"><thead><tr><th>Username</th><th>Name</th><th>Can do</th><th>Last sign-in</th></tr></thead><tbody>
+      ${list.map(a => `<tr><td><b>${esc(a.username)}</b></td><td>${esc(a.name)}</td>
+        <td>${a.role === 'admin' ? '<span class="pill confirmed">Admin</span> <span class="faint">everything, all divisions</span>' : '<span class="pill ready">Shared operator</span> <span class="faint">edit any division</span>'}</td>
+        <td class="faint">${esc(a.last || 'Not yet')}</td></tr>`).join('')}</tbody></table></div></div>`;
+  }
+  // every division user in one list, newest first
+  function everyoneCard() {
+    const when = s => { const m = /^(\d{2})-(\d{2})-(\d{4})\s*(.*)$/.exec(s || ''); return m ? m[3] + m[2] + m[1] + m[4] : ''; };
+    const list = usersData.rows.slice().sort((a, b) => when(b.on).localeCompare(when(a.on)));
+    if (!list.length) return '<div class="card"><p class="muted" style="margin:0">No one has signed up yet.</p></div>';
+    return `<div class="card"><div style="overflow-x:auto"><table class="plain"><thead><tr><th>Name</th><th>Division</th><th>Email · Mobile</th><th>Signed up</th><th>Last sign-in</th><th></th></tr></thead><tbody>
+      ${list.map(u => `<tr><td><b>${esc(u.name)}</b><div class="faint">${esc(u.desig)}</div></td><td>${esc(u.division)}<div class="faint">${esc(u.circle)}</div></td>
+        <td>${esc(u.email)}<div class="faint">${esc(u.phone)}</div></td><td class="faint">${esc(u.on)}</td><td class="faint">${esc(u.last || '—')}</td>
+        <td><div class="row" style="flex-wrap:nowrap">${u.status === 'Active' ? `<button class="btn sm danger" data-act="u-status" data-v="off" data-email="${esc(u.email)}">Disable</button>` : `<button class="btn sm" data-act="u-status" data-v="on" data-email="${esc(u.email)}">Enable</button>`}
+          <button class="btn sm" data-act="u-pass" data-email="${esc(u.email)}">Set password</button></div></td></tr>`).join('')}</tbody></table></div></div>`;
   }
   async function userStatus(email, on) {
     try { usersData = await S.api.call('userStatus', { email, active: on }); toast(on ? 'User enabled' : 'User disabled; they are signed out'); render(); }

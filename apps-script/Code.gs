@@ -106,6 +106,7 @@ function login_(body) {
   if (acc) {
     if (sha256hex_(acc.salt + pw) !== acc.hash) throw wrong();
     user = { name: acc.name || u, role: acc.role === 'admin' ? 'admin' : 'operator', isAdmin: acc.role === 'admin', username: u };
+    PropertiesService.getScriptProperties().setProperty('last|' + u, now_());   // shown on the admin Users page
   } else {
     const t = readUsers_(), r = t.rows.find(x => x.email === u);
     if (!r || pwHash_(r.salt, pw) !== r.hash) throw wrong();
@@ -238,10 +239,15 @@ function setPassword_(email, pw) {
   } finally { lock.releaseLock(); }
 }
 
-/** Admins: every user (without password hashes) and the number of active users in each division. */
+/**
+ * Admins: every division user (without password hashes) and the accounts in Config.local.gs (admins and shared ones),
+ * which are not tied to a division and are changed only in that file.
+ */
 function users_() {
   const rows = readUsers_().rows.map(r => ({ email: r.email, circle: r.circle, division: r.division, name: r.name, desig: r.desig, phone: r.phone, status: r.status, on: r.on, last: r.last }));
-  return { rows, divisions: divisions_() };
+  const props = PropertiesService.getScriptProperties(), accs = local_().accounts;
+  const accounts = Object.keys(accs).map(u => ({ username: u, name: accs[u].name || u, role: accs[u].role === 'admin' ? 'admin' : 'operator', last: props.getProperty('last|' + u) || '' }));
+  return { rows, accounts, divisions: divisions_() };
 }
 function userStatus_(body, user) {
   const email = cleanEmail_(body.email), on = !!body.active;
