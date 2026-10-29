@@ -1,0 +1,6 @@
+.DS_Store
+**/.DS_Store
+apps-script/Config.local.gs
+# real names: never in GitHub
+private/
+__pycache__/
