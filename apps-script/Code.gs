@@ -289,7 +289,7 @@ function show_(f, v) { return f === 'other' ? (v || []).join(', ') : v == null ?
 function cdlSetup() {
   const ss = ss_();
   Logger.log('CDL+BS sheet: ' + ss.getUrl());
-  Logger.log('DL / CDL rows: ' + readTab_('CDL').rows.length + ' · Ban Sahayaks: ' + readTab_('BS').rows.length + ' · divisions: ' + divisions_().length);
+  Logger.log('DL / CDL rows: ' + readTab_('CDL').rows.length + ' · Ban Sahayaks: ' + readTab_('BS').rows.length + ' · divisions: ' + divisions_(true).length);
   Logger.log('Users: ' + Object.keys(local_().accounts).join(', '));
   clearCache_();
 }
@@ -372,12 +372,12 @@ function writeRows_(t, rows) {
 /** What the website gets: everything except the row number. */
 function pub_(o) { const p = Object.assign({}, o); delete p._r; return p; }
 
-/** Circles and divisions: the Lists tab, plus any division that has people. */
-function divisions_() {
+/** Circles and divisions from the Lists tab (quick: the people tabs are not read). withPeople: also any division that has people. */
+function divisions_(withPeople) {
   const out = [], seen = {};
   const add = (c, d) => { if (c && d && !seen[d]) { seen[d] = 1; out.push({ circle: c, division: d }); } };
   tab_(CONFIG.LISTS).getDataRange().getValues().slice(1).forEach(r => add(fmt_(r[0]), fmt_(r[1])));
-  ['CDL', 'BS'].forEach(c => readTab_(c).rows.forEach(r => add(r.circle, r.division)));
+  if (withPeople) ['CDL', 'BS'].forEach(c => readTab_(c).rows.forEach(r => add(r.circle, r.division)));
   return out;
 }
 
@@ -409,7 +409,7 @@ function gzGet_(key) {
   try { return JSON.parse(Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(s), 'application/x-gzip')).getDataAsString()); } catch (e) { return null; }
 }
 function touched_(division) { CacheService.getScriptCache().removeAll(['div|' + division, 'meta']); }
-function clearCache_() { CacheService.getScriptCache().remove('meta'); divisions_().forEach(d => CacheService.getScriptCache().remove('div|' + d.division)); }
+function clearCache_() { CacheService.getScriptCache().remove('meta'); divisions_(true).forEach(d => CacheService.getScriptCache().remove('div|' + d.division)); }
 
 /* ============================================================ rules (same as store.js) */
 
@@ -433,7 +433,7 @@ function status_(p) {
 function meta_(body, user) {
   let m = gzGet_('meta');
   if (!m) {
-    const certs = certs_(), divs = divisions_(), by = {};
+    const certs = certs_(), divs = divisions_(true), by = {};
     divs.forEach(d => { by[d.division] = { circle: d.circle, division: d.division, CDL: count0_(), BS: count0_(), last: { CDL: '', BS: '' } }; });
     const duty = { CDL: {}, BS: {} }, blank = { CDL: 0, BS: 0 };
     let pending = 0;
