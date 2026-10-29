@@ -433,6 +433,55 @@
     w.document.close();
   }
 
+  /* ------------------------------------------------------------ loading animation (as in UPMC): a tree that draws itself, a moving bar, rotating messages and tips */
+  const TREE = `<svg class="tree" viewBox="0 0 64 64" aria-hidden="true">
+    <path class="canopy" d="M32 7c-8 0-14 6-14 13.5 0 1.6.3 3 .8 4.4C14.2 27 11 31.3 11 36.5 11 43.4 16.8 49 24 49h16c7.2 0 13-5.6 13-12.5 0-5.2-3.2-9.5-7.8-11.6.5-1.4.8-2.8.8-4.4C46 13 40 7 32 7Z"/>
+    <path class="trunk" d="M32 57V30M32 42l-7-6M32 37l6-5"/>
+    <path class="ground" d="M17 57h30"/></svg>`;
+  const TIPS = [
+    'Tip: press ✏️ on a row to edit it right in the table, then 💾 to save.',
+    'Tip: ✓ verifies a person. It works once everything is filled.',
+    'Tip: “Missing info” shows only the people who still need something filled.',
+    'Tip: Ban Sahayaks you add count straight away; their pay is fixed at Rs 12,000.',
+    'Tip: “Posted at” comes first: Division HQ or a range. The places of work follow from it.',
+    'Tip: when everyone is verified, the DFO certifies the list and it is locked.',
+  ];
+  const STEPS = {
+    circles: ['Opening the divisions…', 'Counting DLs / CDLs and Ban Sahayaks…', 'Checking what has been verified…', 'Almost there…'],
+    division: ['Opening the division…', 'Reading each person’s details…', 'Arranging them range by range…', 'Almost there…'],
+    admin: ['Collecting from all divisions…', 'Putting it in order…', 'Almost there…'],
+    signup: ['Getting the list of divisions…', 'Almost there…'],
+  };
+  function loaderHtml(kind, title) {
+    const st = STEPS[kind] || STEPS.circles;
+    return `<div class="loader" data-kind="${kind}">${TREE}
+      <b class="ld-title">${esc(title || st[0])}</b>
+      <div class="ibar"><i></i></div>
+      <p class="ld-step">${esc(st[1] || '')}</p>
+      <p class="ld-tip">${esc(TIPS[Math.floor(Math.random() * TIPS.length)])}</p>
+      <p class="ld-slow faint"></p></div>`;
+  }
+  const skeleton = kind => kind === 'division' ? `<div class="sk-rows">${'<div class="skeleton row"></div>'.repeat(8)}</div>`
+    : kind === 'admin' ? `<div class="sk-rows">${'<div class="skeleton row"></div>'.repeat(5)}</div>` : `<div class="divs">${'<div class="skeleton"></div>'.repeat(6)}</div>`;
+  /** Rotates the messages of the loader on screen; stops by itself when the loader is gone. */
+  function animateLoader(root) {
+    const el = root.querySelector('.loader'); if (!el) return;
+    const steps = STEPS[el.dataset.kind] || STEPS.circles, t0 = Date.now();
+    let i = 1, tip = Math.floor(Math.random() * TIPS.length);
+    const timer = setInterval(() => {
+      if (!document.body.contains(el)) return clearInterval(timer);
+      const secs = (Date.now() - t0) / 1000;
+      if (i < steps.length - 1) { i++; swapText(el.querySelector('.ld-step'), steps[i]); }
+      if (Math.round(secs) % 6 < 3) { tip = (tip + 1) % TIPS.length; swapText(el.querySelector('.ld-tip'), TIPS[tip]); }
+      if (secs > 8) el.querySelector('.ld-slow').textContent = 'The first visit after a quiet spell can take up to 20 seconds. Thank you for waiting.';
+    }, 2600);
+  }
+  function swapText(node, text) {
+    if (!node || node.textContent === text) return;
+    node.classList.add('out');
+    setTimeout(() => { node.textContent = text; node.classList.remove('out'); }, 220);
+  }
+
   /* ------------------------------------------------------------ sign in, sign up, forgot password (live) */
   // view: signin | signup | verify | forgot | reset; form: the sign-up details kept for "Send a new code"
   const auth = { view: 'signin', msg: '', email: '', form: null, lists: null };
@@ -444,7 +493,7 @@
       <h1>${title}</h1>${sub ? `<p class="muted">${sub}</p>` : ''}${msg}${body}
       <div class="err" id="aerr" role="alert"></div><button class="btn primary block" type="submit" id="ago">${btn}</button>`;
     if (v === 'signup') {
-      if (!auth.lists) { app.innerHTML = '<div class="loading">Loading…</div>'; S.api.open('lists').then(d => { auth.lists = d.divisions; render(); }, x => { auth.msg = ''; app.innerHTML = `<div class="card"><p class="muted">${esc(x.message)}</p><button class="btn primary" data-act="retry">Try again</button></div>`; }); return; }
+      if (!auth.lists) { app.innerHTML = loaderHtml('signup'); animateLoader(app); S.api.open('lists').then(d => { auth.lists = d.divisions; render(); }, x => { auth.msg = ''; app.innerHTML = `<div class="card"><p class="muted">${esc(x.message)}</p><button class="btn primary" data-act="retry">Try again</button></div>`; }); return; }
       const circles = [...new Set(auth.lists.map(d => d.circle))];
       const ff = auth.form || {};
       app.innerHTML = card('Create an account', '', `
@@ -498,7 +547,7 @@
     const busy = (on, text) => { if (go) { go.disabled = on; if (text) go.textContent = text; } };
     if (er) er.textContent = '';
     const label = go && go.textContent;
-    busy(true, 'Please wait…');
+    busy(true); if (go) go.innerHTML = '<span class="spin" aria-hidden="true"></span>' + esc(v === 'signin' ? 'Signing in…' : 'Please wait…');
     try {
       if (v === 'signin') {
         auth.email = val('lu').trim();
@@ -638,10 +687,11 @@
 
   /* ------------------------------------------------------------ router */
   const route = () => decodeURIComponent(location.hash.slice(1) || '/');
-  // live: shows "Loading…" until what the page needs has come from the API (once); later visits refresh in the background
-  function need(ready, load, label) {
+  // live: shows the loading animation until what the page needs has come from the API (once); later visits refresh in the background
+  function need(ready, load, label, kind) {
     if (ready) return false;
-    app.innerHTML = `<div class="loading">${esc(label)}</div>`;
+    app.innerHTML = loaderHtml(kind || 'circles', label) + skeleton(kind);
+    animateLoader(app);
     load().then(render, err => {
       if (err.auth) { S.signOut(); render(); return; }
       app.innerHTML = `<div class="card"><h2>Could not load</h2><p class="muted">${esc(err.message)}</p><button class="btn primary" data-act="retry">Try again</button></div>`;
@@ -654,11 +704,14 @@
     $('#flag').hidden = S.LIVE;
     if (!S.user) { login(); return; }
     if (S.LIVE) {
-      if (need(!!S.meta, S.loadMeta, 'Loading the divisions…')) return;
-      if (h.startsWith('/d/') && need(S.isLoaded(h.slice(3)), () => S.loadDivision(h.slice(3)), `Loading ${h.slice(3)}…`)) return;
-      if (h === '/approvals' && need(S.pendingLoaded, S.loadPending, 'Loading the requests…')) return;
-      if (h === '/log' && need(S.logLoaded, S.loadLog, 'Loading the change log…')) return;
-      if (h === '/users' && need(!!usersData, loadUsers, 'Loading the users…')) return;
+      const div = h.startsWith('/d/') ? h.slice(3) : '';
+      // a division and the summary are fetched together
+      if (div && need(S.meta && S.isLoaded(div), () => Promise.all([S.meta ? null : S.loadMeta(), S.isLoaded(div) ? null : S.loadDivision(div)]), `Opening ${div}…`, 'division')) return;
+      if (need(!!S.meta, S.loadMeta, 'Opening the divisions…', 'circles')) return;
+      if (h === '/approvals' && need(S.pendingLoaded, S.loadPending, 'Collecting the requests…', 'admin')) return;
+      if (h === '/log' && need(S.logLoaded, S.loadLog, 'Reading the change log…', 'admin')) return;
+      if (h === '/users' && need(!!usersData, loadUsers, 'Counting the users…', 'admin')) return;
+      refresh();
     }
     if (h.startsWith('/d/')) division(h.slice(3));
     else if (h.startsWith('/c/')) circlePage(h.slice(3));
@@ -669,18 +722,20 @@
     else if (S.user.role === 'admin') dashboard();
     else picker();
   }
-  // live: what others saved since the page was last loaded
-  function refresh() {
-    if (!S.LIVE || !S.user || !S.meta) return;
-    const h = route(), at = location.hash;
-    const again = () => { if (location.hash === at && !ui.edit && !dr && !S.saving) render(); };
-    if (h.startsWith('/d/')) { const div = h.slice(3); if (S.isLoaded(div) && Date.now() - S.loadedAt(div) > 60000) S.loadDivision(div).then(again, () => {}); }
-    else S.loadMeta().then(again, () => {});
-    if (h === '/approvals' && S.pendingLoaded) S.loadPending().then(again, () => {});
-    if (h === '/log' && S.logLoaded) S.loadLog().then(again, () => {});
-    if (h === '/users' && usersData) loadUsers().then(again, () => {});
+  // live: fetches again in the background what is more than a minute old (or came from this device), then redraws if nothing is being edited.
+  // force (on changing page): the admin lists too
+  const inflight = {};
+  function refresh(force) {
+    const h = route(), at = location.hash, old = t => Date.now() - t > 60000;
+    const again = () => { if (location.hash === at && !ui.edit && !dr && !S.saving && !modal.classList.contains('on')) render(); };
+    const bg = (key, fn) => { if (inflight[key]) return; inflight[key] = 1; fn().then(again, () => {}).finally(() => { delete inflight[key]; }); };
+    if (h.startsWith('/d/')) { const div = h.slice(3); if (old(S.loadedAt(div))) bg('d|' + div, () => S.loadDivision(div)); }
+    else if (old(S.metaAt)) bg('meta', S.loadMeta);
+    if (force && h === '/approvals') bg('pending', S.loadPending);
+    if (force && h === '/log') bg('log', S.loadLog);
+    if (force && h === '/users') bg('users', loadUsers);
   }
-  window.addEventListener('hashchange', () => { closeDrawer(); window.scrollTo(0, 0); refresh(); render(); });
+  window.addEventListener('hashchange', () => { closeDrawer(); window.scrollTo(0, 0); if (S.LIVE && S.user && S.meta) refresh(true); render(); });
   // live: a refused save brings the division back as the sheet has it; an expired sign-in goes back to the sign-in page
   S.onError(err => {
     if (err.auth) { S.signOut(); closeDrawer(); render(); toast('Please sign in again.'); return; }

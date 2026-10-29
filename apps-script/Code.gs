@@ -285,23 +285,38 @@ function show_(f, v) { return f === 'other' ? (v || []).join(', ') : v == null ?
 
 /* ============================================================ sheet */
 
-/** Run once from the editor: creates (or checks) the sheet and logs its link and the numbers in it. */
+/**
+ * Run once from the editor (and again after updating the script): checks the sheet, logs its link and the numbers in it,
+ * fills the cache, and sets up the 10-minute timer that keeps the cache filled (warm).
+ */
 function cdlSetup() {
   const ss = ss_();
   Logger.log('CDL+BS sheet: ' + ss.getUrl());
   Logger.log('DL / CDL rows: ' + readTab_('CDL').rows.length + ' · Ban Sahayaks: ' + readTab_('BS').rows.length + ' · divisions: ' + divisions_(true).length);
   Logger.log('Users: ' + Object.keys(local_().accounts).join(', '));
-  clearCache_();
+  if (!ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'warm')) {
+    ScriptApp.newTrigger('warm').timeBased().everyMinutes(10).create();
+    Logger.log('Timer set: warm() runs every 10 minutes.');
+  }
+  buildAll_();
+  Logger.log('Cache filled.');
+}
+/** Every 10 minutes (timer from cdlSetup): refills the cache before it expires, so no one waits for the whole sheet to be read. */
+function warm() {
+  if (gzGet_('meta') && CacheService.getScriptCache().get('warm')) return;
+  buildAll_();
 }
 
 /**
  * The CDL+BS sheet: SHEET_ID from Config.local.gs, else the sheet this script was opened from
  * (Extensions → Apps Script), else the one cdlSetup() created earlier, else a new one. Missing tabs are added.
  */
+let SS_ = null;   // opened once per request
 function ss_() {
+  if (SS_) return SS_;
   const props = PropertiesService.getScriptProperties();
   const fixed = local_().sheetId || props.getProperty(CONFIG.PROP);
-  if (fixed) return tabs_(SpreadsheetApp.openById(fixed));
+  if (fixed) return (SS_ = tabs_(SpreadsheetApp.openById(fixed)));
   const bound = SpreadsheetApp.getActiveSpreadsheet();
   if (bound) { props.setProperty(CONFIG.PROP, bound.getId()); return tabs_(bound); }
   const lock = LockService.getScriptLock(); lock.waitLock(20000);
@@ -334,13 +349,25 @@ function readTab_(cadre) {
   const sh = tab_(CONFIG.TAB[cadre]), v = sh.getDataRange().getValues();
   const head = (v[0] || []).map(h => String(h).trim()), at = COLS.map(c => head.indexOf(c[1]));
   const rows = [];
-  for (let r = 1; r < v.length; r++) {
-    const o = { cadre, _r: r + 1 };
-    COLS.forEach((c, j) => { o[c[0]] = at[j] < 0 ? '' : (c[0] === 'updOn' ? fmtTs_(v[r][at[j]]) : fmt_(v[r][at[j]])); });
-    if (!o.id) continue;
-    rows.push(fromSheet_(o));
-  }
+  for (let r = 1; r < v.length; r++) { const o = rowObj_(cadre, at, v[r], r + 1); if (o.id) rows.push(o); }
   return { sh, head, rows };
+}
+function rowObj_(cadre, at, row, r) {
+  const o = { cadre, _r: r };
+  COLS.forEach((c, j) => { o[c[0]] = at[j] < 0 ? '' : (c[0] === 'updOn' ? fmtTs_(row[at[j]]) : fmt_(row[at[j]])); });
+  return fromSheet_(o);
+}
+/** One person by ID without reading the whole tab: the ID column, then that one row. Same shape as readTab_. */
+function findPerson_(id) {
+  const cadre = cadreOf_(id), sh = tab_(CONFIG.TAB[cadre]), last = sh.getLastRow();
+  const head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(h => String(h).trim());
+  const t = { sh, head, rows: [] };
+  if (last < 2) return t;
+  const ids = sh.getRange(2, head.indexOf('ID') + 1, last - 1, 1).getValues(), at = COLS.map(c => head.indexOf(c[1]));
+  for (let i = 0; i < ids.length; i++) {
+    if (fmt_(ids[i][0]) === id) { t.rows.push(rowObj_(cadre, at, sh.getRange(i + 2, 1, 1, head.length).getValues()[0], i + 2)); break; }
+  }
+  return t;
 }
 function fromSheet_(o) {
   o.other = o.other ? o.other.split(/\s*;\s*/).filter(Boolean) : [];
@@ -399,17 +426,66 @@ function log_rows_(user, entries) {
 
 /* ============================================================ cache */
 
-// One division's people (gzipped) and the summary are cached; any change to a division clears both.
+// Each division's people and the summary are cached (gzipped, split into pieces under the 100 KB limit).
+// A change updates the cached division and its line of the summary instead of throwing them away, so reads stay quick.
+const PIECE = 90000;
 function gzPut_(key, obj) {
   const s = Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(JSON.stringify(obj), 'application/json')).getBytes());
-  if (s.length < 95000) CacheService.getScriptCache().put(key, s, CACHE_SEC);
+  const parts = {}, n = Math.ceil(s.length / PIECE) || 1;
+  for (let i = 0; i < n; i++) parts[key + '#' + i] = s.slice(i * PIECE, (i + 1) * PIECE);
+  parts[key] = 'parts:' + n;
+  CacheService.getScriptCache().putAll(parts, CACHE_SEC);
 }
 function gzGet_(key) {
-  const s = CacheService.getScriptCache().get(key); if (!s) return null;
-  try { return JSON.parse(Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(s), 'application/x-gzip')).getDataAsString()); } catch (e) { return null; }
+  const c = CacheService.getScriptCache(), head = c.get(key);
+  if (!head || head.indexOf('parts:') !== 0) return null;
+  const keys = []; for (let i = 0; i < +head.slice(6); i++) keys.push(key + '#' + i);
+  const got = c.getAll(keys); if (keys.some(k => !got[k])) return null;
+  try { return JSON.parse(Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(keys.map(k => got[k]).join('')), 'application/x-gzip')).getDataAsString()); } catch (e) { return null; }
 }
-function touched_(division) { CacheService.getScriptCache().removeAll(['div|' + division, 'meta']); }
-function clearCache_() { CacheService.getScriptCache().remove('meta'); divisions_(true).forEach(d => CacheService.getScriptCache().remove('div|' + d.division)); }
+/** Reads both people tabs once and caches every division and the summary. */
+function buildAll_() {
+  const divs = divisions_(), seen = {}, by = {};
+  divs.forEach(d => { seen[d.division] = 1; by[d.division] = []; });
+  ['CDL', 'BS'].forEach(c => readTab_(c).rows.forEach(p => {
+    if (!seen[p.division]) { seen[p.division] = 1; divs.push({ circle: p.circle, division: p.division }); by[p.division] = []; }
+    if (p.state !== 'removed') by[p.division].push(pub_(p));
+  }));
+  divs.forEach(d => gzPut_('div|' + d.division, by[d.division]));
+  const m = { divisions: divs.map(d => Object.assign({ circle: d.circle, division: d.division }, summary_(by[d.division]))), certs: certs_() };
+  gzPut_('meta', m);
+  CacheService.getScriptCache().put('warm', '1', CACHE_SEC - 3600);
+  return { m, by };
+}
+/** A division's line of the summary, from its people (both cadres). */
+function summary_(rows) {
+  const o = { CDL: count0_(), BS: count0_(), last: { CDL: '', BS: '' }, duty: { CDL: {}, BS: {} }, blank: { CDL: 0, BS: 0 }, pending: 0 };
+  rows.forEach(p => {
+    const c = p.cadre === 'BS' ? 'BS' : 'CDL', s = status_(p); if (s === 'removed') return;
+    const k = o[c]; k.all++; k[s]++; if (p.state === 'add-pending') k.added++;
+    if (p.state === 'add-pending' || p.state === 'remove-pending') o.pending++;
+    if (s !== 'remove') { if (p.duty) o.duty[c][p.duty] = (o.duty[c][p.duty] || 0) + 1; else o.blank[c]++; }
+    if (sortKey_(p.updOn) > sortKey_(o.last[c])) o.last[c] = p.updOn;
+  });
+  ['CDL', 'BS'].forEach(c => { o[c].active = o[c].all - o[c].remove; });
+  return o;
+}
+/** After a change: puts the changed people into the cached division and updates its line of the summary. */
+function refreshCache_(division, changed) {
+  const rows = gzGet_('div|' + division);
+  if (!rows) { CacheService.getScriptCache().remove('meta'); return; }   // rebuilt on the next read
+  changed.forEach(p => {
+    const q = pub_(p), i = rows.findIndex(r => r.id === q.id);
+    if (q.state === 'removed') { if (i >= 0) rows.splice(i, 1); } else if (i >= 0) rows[i] = q; else rows.push(q);
+  });
+  gzPut_('div|' + division, rows);
+  const m = gzGet_('meta'), d = m && m.divisions.find(x => x.division === division);
+  if (!d) { CacheService.getScriptCache().remove('meta'); return; }
+  Object.assign(d, summary_(rows));
+  gzPut_('meta', m);
+}
+/** After certifying or reopening: the certificates in the cached summary. */
+function refreshCerts_() { const m = gzGet_('meta'); if (m) { m.certs = certs_(); gzPut_('meta', m); } }
 
 /* ============================================================ rules (same as store.js) */
 
@@ -431,25 +507,16 @@ function status_(p) {
 
 /** Summary for the division picker, circle pages and the dashboard. */
 function meta_(body, user) {
-  let m = gzGet_('meta');
-  if (!m) {
-    const certs = certs_(), divs = divisions_(true), by = {};
-    divs.forEach(d => { by[d.division] = { circle: d.circle, division: d.division, CDL: count0_(), BS: count0_(), last: { CDL: '', BS: '' } }; });
-    const duty = { CDL: {}, BS: {} }, blank = { CDL: 0, BS: 0 };
-    let pending = 0;
-    ['CDL', 'BS'].forEach(c => readTab_(c).rows.forEach(p => {
-      const d = by[p.division]; if (!d) return;
-      const s = status_(p); if (s === 'removed') return;
-      const k = d[c]; k.all++; k[s]++; if (p.state === 'add-pending') k.added++;
-      if (p.state === 'add-pending' || p.state === 'remove-pending') pending++;
-      if (s !== 'remove') { if (p.duty) duty[c][p.duty] = (duty[c][p.duty] || 0) + 1; else blank[c]++; }
-      if (sortKey_(p.updOn) > sortKey_(d.last[c])) d.last[c] = p.updOn;
-    }));
-    divs.forEach(d => ['CDL', 'BS'].forEach(c => { const k = by[d.division][c]; k.active = k.all - k.remove; }));
-    m = { divisions: divs.map(d => by[d.division]), certs, duty, blank, pending };
-    gzPut_('meta', m);
-  }
-  const out = Object.assign({ user }, m);
+  const m = gzGet_('meta') || buildAll_().m;
+  // state totals, added up from the divisions' lines
+  const duty = { CDL: {}, BS: {} }, blank = { CDL: 0, BS: 0 };
+  let pending = 0;
+  m.divisions.forEach(d => {
+    pending += d.pending || 0;
+    ['CDL', 'BS'].forEach(c => { blank[c] += d.blank[c]; Object.keys(d.duty[c]).forEach(k => { duty[c][k] = (duty[c][k] || 0) + d.duty[c][k]; }); });
+  });
+  const out = { user, certs: m.certs, duty, blank, pending,
+    divisions: m.divisions.map(d => ({ circle: d.circle, division: d.division, CDL: d.CDL, BS: d.BS, last: d.last })) };
   if (user.isAdmin) { out.userCounts = {}; readUsers_().rows.forEach(r => { if (r.status === 'Active') out.userCounts[r.division] = (out.userCounts[r.division] || 0) + 1; }); }
   return out;
 }
@@ -459,12 +526,7 @@ function count0_() { return { all: 0, missing: 0, ready: 0, problem: 0, confirme
 function load_(body) {
   const division = String(body.division || '');
   if (!division) throw new Error('Choose a division.');
-  let rows = gzGet_('div|' + division);
-  if (!rows) {
-    rows = [];
-    ['CDL', 'BS'].forEach(c => readTab_(c).rows.forEach(p => { if (p.division === division && p.state !== 'removed') rows.push(pub_(p)); }));
-    gzPut_('div|' + division, rows);
-  }
+  const rows = gzGet_('div|' + division) || buildAll_().by[division] || [];
   const certs = certs_(), mine = {};
   ['CDL', 'BS'].forEach(c => { if (certs[division + '|' + c]) mine[c] = certs[division + '|' + c]; });
   return { division, rows, certs: mine };
@@ -477,16 +539,15 @@ function load_(body) {
 function withPerson_(id, base, user, fn) {
   const lock = LockService.getScriptLock(); lock.waitLock(25000);
   try {
-    const cadre = cadreOf_(id), t = readTab_(cadre), p = t.rows.find(r => r.id === id);
+    const cadre = cadreOf_(id), t = findPerson_(id), p = t.rows[0];
     if (!p) throw err_('This person is no longer in the list. The page has been refreshed.', true);
     mayEdit_(user, p.division);
     if (base != null && String(base) !== String(p.updOn || ''))
       throw err_(p.name + ' was changed by ' + (p.updBy || 'someone') + ' at ' + p.updOn + '. The list has been refreshed; please check and try again.', true);
     if (locked_(p.division, cadre)) throw new Error('This list is certified and locked.');
     const before = JSON.stringify(p), entries = fn(t, p) || [];
-    if (JSON.stringify(p) !== before) { p.updOn = now_(); p.updBy = who_(user); writeRows_(t, [p]); }
+    if (JSON.stringify(p) !== before) { p.updOn = now_(); p.updBy = who_(user); writeRows_(t, [p]); refreshCache_(p.division, [p]); }
     log_rows_(user, entries);
-    touched_(p.division);
     return { rows: [pub_(p)] };
   } finally { lock.releaseLock(); }
 }
@@ -535,9 +596,9 @@ function confirm_(body, user) {
         out.push(pub_(p));
       });
       writeRows_(t, changed);
+      Object.keys(divs).forEach(d => refreshCache_(d, changed.filter(p => p.division === d)));
     });
     log_rows_(user, log);
-    Object.keys(divs).forEach(touched_);
     return { rows: out, done, skipped };
   } finally { lock.releaseLock(); }
 }
@@ -582,9 +643,10 @@ function resolveFlag_(body, user) {
     const log = [];
     if (dup && p.state === 'active') { p.state = 'remove-pending'; p.removal = { reason: 'Duplicate entry', remark: '', by: who_(user), on: now_() }; log.push({ p, type: 'Marked not working', field: 'Reason', new: 'Duplicate entry' }); }
     else log.push({ p, type: 'Problem resolved', new: 'Different people' });
-    writeRows_(t, twins.indexOf(p) < 0 ? twins.concat(p) : twins);
+    const changed = twins.indexOf(p) < 0 ? twins.concat(p) : twins;
+    writeRows_(t, changed);
+    refreshCache_(p.division, changed);
     log_rows_(user, log);
-    touched_(p.division);
     return { rows: twins.concat(twins.indexOf(p) < 0 ? [p] : []).map(pub_) };
   } finally { lock.releaseLock(); }
 }
@@ -602,15 +664,15 @@ function add_(body, user) {
   const lock = LockService.getScriptLock(); lock.waitLock(25000);
   try {
     if (locked_(div.division, cadre)) throw new Error('This list is certified and locked.');
-    const t = readTab_(cadre);
-    if (t.rows.some(r => r.id === id)) return { rows: [pub_(t.rows.find(r => r.id === id))] };   // sent twice
+    const t = findPerson_(id);
+    if (t.rows.length) return { rows: [pub_(t.rows[0])] };   // sent twice
     const p = { id, cadre, circle: div.circle, division: div.division, name, ver: '', state: cadre === 'BS' ? 'active' : 'add-pending', flag: '', removal: null, orig: null,
       updOn: now_(), updBy: who_(user) };
     EDITABLE.forEach(f => { if (f !== 'name') p[f] = f === 'other' ? (d.other || []).filter(x => DUTIES.indexOf(x) >= 0) : f === 'pay' ? (d.pay == null || d.pay === '' ? null : Number(d.pay)) : String(d[f] || '').trim(); });
     if (cadre === 'BS') Object.assign(p, { mode: 'Direct', agency: '', pay: BS_PAY });
     writeRows_(t, [p]);
+    refreshCache_(p.division, [p]);
     log_rows_(user, [{ p, type: 'Added', new: cadre === 'BS' ? 'Ban Sahayak' : 'New person' }]);
-    touched_(p.division);
     return { rows: [pub_(p)] };
   } finally { lock.releaseLock(); }
 }
@@ -624,14 +686,14 @@ function certify_(body, user) {
   const lock = LockService.getScriptLock(); lock.waitLock(25000);
   try {
     if (locked_(division, cadre)) throw new Error('Already certified.');
-    const mine = readTab_(cadre).rows.filter(p => p.division === division && p.state !== 'removed');
+    const mine = (gzGet_('div|' + division) || readTab_(cadre).rows).filter(p => p.division === division && (p.cadre || 'CDL') === cadre && p.state !== 'removed');
     const active = mine.filter(p => p.state !== 'remove-pending');
     if (!active.length || active.some(p => status_(p) !== 'confirmed')) throw new Error('Verify everyone first.');
     const cert = { name, desig, on: now_(), by: who_(user) };
     const sh = tab_(CONFIG.CERT);
     sh.getRange(sh.getLastRow() + 1, 1, 1, CERT_HEADERS.length).setNumberFormat('@').setValues([[division, cadre, name, desig, cert.on, who_(user)]]);
     log_rows_(user, [{ division, circle: mine[0].circle, cadre, type: CADRE_NAME[cadre] + ' list certified', new: name + ', ' + desig }]);
-    touched_(division);
+    refreshCerts_();
     return { cert };
   } finally { lock.releaseLock(); }
 }
@@ -642,7 +704,7 @@ function reopen_(body, user) {
     const sh = tab_(CONFIG.CERT), v = sh.getDataRange().getValues();
     for (let r = v.length - 1; r >= 1; r--) if (fmt_(v[r][0]) === division && (fmt_(v[r][1]) || 'CDL') === cadre) sh.deleteRow(r + 1);
     log_rows_(user, [{ division, cadre, type: CADRE_NAME[cadre] + ' list reopened' }]);
-    touched_(division);
+    refreshCerts_();
     return {};
   } finally { lock.releaseLock(); }
 }

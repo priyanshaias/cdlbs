@@ -41,7 +41,7 @@
       people: (window.CDL_DEMO || []).map(p => Object.assign({ cadre: 'CDL', ver: '', state: 'active', updOn: '', updBy: '' }, p, { other: (p.other || []).slice() })) };
   }
   function load() {
-    if (LIVE) { st = { user: API.user, log: [], certified: {}, people: [], meta: null, loaded: {}, pendingRows: null }; return; }
+    if (LIVE) { st = { user: API.user, log: [], certified: {}, people: [], meta: null, metaAt: 0, loaded: {}, pendingRows: null }; fromDevice(); return; }
     try { st = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { st = null; }
     if (!st || !st.people) { st = fresh(); save(); }
     st.people.forEach(p => {   // lists saved before "Posted at" and Ban Sahayaks
@@ -74,17 +74,42 @@
     if (!LIVE) return;
     waiting++; hooks.busy(waiting);
     queue = queue.then(() => API.call(action, typeof body === 'function' ? body() : body))
-      .then(res => { apply(res && res.rows); if (res && res.cert) st.certified[ck(div, body.cadre)] = res.cert; if (action === 'decide' && st.pendingRows) st.pendingRows = st.pendingRows.filter(p => p.id !== body.id); })
+      .then(res => { apply(res && res.rows); toDevice(); if (res && res.cert) st.certified[ck(div, body.cadre)] = res.cert; if (action === 'decide' && st.pendingRows) st.pendingRows = st.pendingRows.filter(p => p.id !== body.id); })
       .catch(err => (div && !err.auth ? loadDivision(div).catch(() => {}) : Promise.resolve()).then(() => hooks.error(err)))
       .finally(() => { waiting--; hooks.busy(waiting); });
+  }
+  // live: the summary and the last 3 divisions opened are kept on this device for this user, so the next visit shows them at once
+  // (marked old, so they are fetched again in the background). Signing out removes them.
+  const DKEY = () => 'cdlbs_cache|' + ((st.user && st.user.username) || '');
+  let deviceTimer = 0;
+  function toDevice() {
+    clearTimeout(deviceTimer);
+    deviceTimer = setTimeout(() => {
+      try {
+        const divs = Object.keys(st.loaded).sort((a, b) => st.loaded[b] - st.loaded[a]).slice(0, 3), d = {};
+        divs.forEach(x => { d[x] = { rows: st.people.filter(p => p.division === x), certs: { CDL: st.certified[ck(x, 'CDL')] || null, BS: st.certified[ck(x, 'BS')] || null } }; });
+        localStorage.setItem(DKEY(), JSON.stringify({ meta: st.meta, divs: d }));
+      } catch (e) { /* full or blocked: the next visit simply loads from the API */ }
+    }, 400);
+  }
+  function fromDevice() {
+    if (!st.user) return;
+    try {
+      const c = JSON.parse(localStorage.getItem(DKEY()) || 'null'); if (!c) return;
+      st.meta = c.meta || null;
+      Object.keys(c.divs || {}).forEach(x => {
+        st.people = st.people.concat(c.divs[x].rows.map(normal)); st.loaded[x] = 1;
+        ['CDL', 'BS'].forEach(k => { if (c.divs[x].certs[k]) st.certified[ck(x, k)] = c.divs[x].certs[k]; });
+      });
+    } catch (e) { /* ignore a damaged copy */ }
   }
   async function loadDivision(div) {
     const res = await API.call('load', { division: div });
     st.people = st.people.filter(p => p.division !== div).concat(res.rows.map(normal));
     ['CDL', 'BS'].forEach(c => { if (res.certs[c]) st.certified[ck(div, c)] = res.certs[c]; else delete st.certified[ck(div, c)]; });
-    st.loaded[div] = Date.now();
+    st.loaded[div] = Date.now(); toDevice();
   }
-  async function loadMeta() { st.meta = await API.call('meta'); }
+  async function loadMeta() { st.meta = await API.call('meta'); st.metaAt = Date.now(); toDevice(); }
   async function loadPending() { st.pendingRows = (await API.call('pending')).rows.map(normal); }
   async function loadLog() { st.log = (await API.call('log')).rows; st.logAt = Date.now(); }
 
@@ -255,8 +280,8 @@
   }
   function reopen(div, cadre) { delete st.certified[ck(div, cadre)]; send('reopen', { division: div, cadre }, div); st.log.unshift({ on: now(), by: st.user.name, division: div, cadre, id: '', name: '', type: CADRES[cadre] + ' list reopened', field: '', old: '', new: '' }); save(); }
 
-  function signIn(u) { st.user = u; save(); }
-  function signOut() { if (LIVE) { API.signOut(); load(); return; } st.user = null; save(); }
+  function signIn(u) { st.user = u; save(); if (LIVE) fromDevice(); }
+  function signOut() { if (LIVE) { try { localStorage.removeItem(DKEY()); } catch (e) { /* fine */ } API.signOut(); load(); return; } st.user = null; save(); }
   /** People working by main duty: counted here in the demo, by the API when live. */
   function dutyCounts(cadre) {
     if (LIVE) return { duty: (st.meta && st.meta.duty[cadre]) || {}, blank: (st.meta && st.meta.blank[cadre]) || 0 };
@@ -268,6 +293,7 @@
   load();
   window.CDL_STORE = { LIVE, loadDivision, loadMeta, loadPending, loadLog, dutyCounts,
     isLoaded: div => !LIVE || !!st.loaded[div], loadedAt: div => st.loaded && st.loaded[div] || 0, get meta() { return LIVE ? st.meta : true; },
+    get metaAt() { return LIVE ? st.metaAt : Date.now(); },
     get pendingLoaded() { return !LIVE || !!st.pendingRows; }, get logLoaded() { return !LIVE || !!st.logAt; }, api: API, get saving() { return waiting; },
     onError: fn => { hooks.error = fn; }, onBusy: fn => { hooks.busy = fn; }, BS_PAY, CADRES, DUTIES, PLACES, HQ, DIV_PLACES, RANGE_PLACES, MODES, show: fmt, original, changed, lastEdit, DISTRICTS, REASONS, LABEL, REQUIRED, REQUIRED_BS,
     get user() { return st.user; }, get log() { return st.log; }, get all() { return st.people; }, get pendingCount() { return LIVE ? (st.meta ? st.meta.pending : 0) : pending().length; },

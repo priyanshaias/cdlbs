@@ -309,7 +309,7 @@ table.plain { width: 100%; border-collapse: collapse; font-size: 14px; }
 /* live: saving indicator and loading state */
 .sync { font-size: 13px; font-weight: 600; color: var(--good-ink); white-space: nowrap; }
 .sync.on { color: var(--text-subtle); }
-.loading { padding: 60px 0; text-align: center; color: var(--text-subtle); font-weight: 600; }
+
 .login .err { min-height: 18px; margin: 4px 0 8px; }
 
 /* sign-up and sign-in */
@@ -326,3 +326,31 @@ table.plain { width: 100%; border-collapse: collapse; font-size: 14px; }
 .ucount.zero { background: var(--warn-soft); color: var(--warn-ink); }
 .ucount.one { background: #e3f3e6; color: var(--good-ink); }
 .ucount.many { background: #fff1c2; color: #8a6500; }
+
+/* loading animation (as in UPMC) */
+.loader { text-align: center; padding: 30px 20px 26px; margin-bottom: 18px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r16);
+  animation: up .45s cubic-bezier(.2,.8,.2,1) both; }
+.loader .tree { width: 74px; height: 74px; display: block; margin: 0 auto 10px; overflow: visible; }
+.loader .tree path { fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.loader .canopy { stroke: var(--good); fill: var(--good-tint) !important; stroke-dasharray: 150; stroke-dashoffset: 150;
+  animation: draw 2.8s cubic-bezier(.2,.8,.2,1) infinite, sway 2.8s ease-in-out infinite; transform-origin: 32px 49px; }
+.loader .trunk { --len: 60; stroke: var(--ink); stroke-dasharray: 60; stroke-dashoffset: 60; animation: draw 2.8s cubic-bezier(.2,.8,.2,1) infinite; }
+.loader .ground { stroke: var(--border-strong); }
+.loader .ld-title { display: block; color: var(--ink); font-size: 17px; font-weight: 800; letter-spacing: -0.015em; }
+.loader .ld-step { margin: 10px 0 0; font-size: 14px; color: var(--text-body); min-height: 22px; transition: opacity .22s, transform .22s; }
+.loader .ld-tip { margin: 14px auto 0; max-width: 460px; font-size: 13px; color: var(--violet-ink); background: var(--violet-soft); padding: 8px 12px;
+  border-radius: var(--r9); transition: opacity .22s, transform .22s; }
+.loader .ld-slow { margin: 10px 0 0; min-height: 18px; }
+.loader .out { opacity: 0; transform: translateY(4px); }
+.ibar { position: relative; height: 6px; max-width: 260px; margin: 14px auto 0; background: var(--line); border-radius: var(--pill); overflow: hidden; }
+.ibar i { position: absolute; top: 0; bottom: 0; width: 40%; border-radius: inherit; background: linear-gradient(90deg, var(--good), var(--primary)); animation: slide 1.4s ease-in-out infinite; }
+.skeleton { height: 92px; border-radius: var(--r12); background: linear-gradient(90deg, var(--surface-sunken), var(--surface-inset), var(--surface-sunken)); background-size: 200% 100%; animation: sh 1.2s infinite; }
+.sk-rows { display: grid; gap: 8px; } .skeleton.row { height: 44px; border-radius: var(--r9); }
+.btn .spin { display: inline-block; width: 15px; height: 15px; margin-right: 8px; vertical-align: -2px; border: 2px solid rgba(255,255,255,.45); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes draw { 0% { stroke-dashoffset: var(--len, 150); } 45%, 75% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: calc(var(--len, 150) * -1); } }
+@keyframes sway { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(2.5deg); } }
+@keyframes slide { 0% { left: -40%; } 100% { left: 100%; } }
+@keyframes sh { to { background-position: -200% 0; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .loader .canopy, .loader .trunk { stroke-dashoffset: 0; animation: none; } .ibar i, .skeleton, .btn .spin { animation: none; } }

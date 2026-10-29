@@ -40,7 +40,12 @@ CDL+BS is separate from UPMC2 and FV. It has its own repo, Apps Script project, 
 ## How saving works
 - Each change is shown at once and sent to the API in the background, one at a time. The top bar shows **Saving…** and then **All changes saved**.
 - Each save carries the person's "Last updated on" as the website last saw it. If someone else saved that person in between, nothing is overwritten. The operator is told who changed it, and the division is loaded again.
-- The API caches each division and the summary (gzipped, in the script cache) and clears them on every change to that division.
+- **Speed:**
+  - The API keeps each division and the summary in its cache (gzipped, split under the 100 KB limit).
+  - A save reads only the ID column and that person's row, then updates the cached division and its line of the summary instead of clearing them. The next page opens without reading the sheet.
+  - A timer (`warm`, every 10 minutes, set up by `cdlSetup`) refills the cache before it expires.
+  - The website loads a division and the summary together. It keeps the summary and the last 3 divisions opened on the device, so the next visit shows them at once and updates them quietly in the background. Signing out removes that copy.
+  - While something loads, it shows UPMC's loading animation: a tree that draws itself, a moving bar, and rotating messages and tips.
 
 ## Setup (once)
 
@@ -65,7 +70,9 @@ CDL+BS is separate from UPMC2 and FV. It has its own repo, Apps Script project, 
 2. Push. GitHub Pages serves `docs/` from `main` (https://priyanshaias.github.io/cdlbs/). For cdl.forestwb.in: add a DNS CNAME record `cdl` → `priyanshaias.github.io`, then put `cdl.forestwb.in` in `docs/CNAME`.
 
 ### Changing the script later
-Use **Deploy → Manage deployments → ✏️ → Version: New version**, so the `/exec` URL stays the same. To roll back, choose the earlier version there.
+1. Paste the new `Code.gs` (and `appsscript.json` if it changed) and save.
+2. Run **cdlSetup** once. It asks for any new permission, refills the cache and checks the timer.
+3. **Deploy → Manage deployments → ✏️ → Version: New version → Deploy**, so the `/exec` URL stays the same. To roll back, choose the earlier version there.
 
 ### Changing a password
 - **Division users:** "Forgot password" on the sign-in page, or an admin sets a new one on the **Users** page.
