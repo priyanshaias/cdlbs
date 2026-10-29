@@ -4,16 +4,16 @@
  * Edits save straight in, one person at a time; new DLs / CDLs and removals wait for an admin; the DFO certifies each list.
  * Every change is written to the Change Log with who made it.
  * Data: its own Google Sheet — tabs DL-CDL, Ban Sahayak, Change Log, Certificates, Lists, Users.
- * Auth: division users sign up with their email (confirmed by a code sent to it) and a password, kept as a salted hash in the Users tab;
+ * Auth: division users sign up with their email (confirmed by a code sent to it) and a password, kept as plain text in the Users tab;
  * admins are in Config.local.gs (not in GitHub). The server issues a session token kept in the script cache.
  * A division user can change only their own division.
  * Deploy: Web app · Execute as: Me · Who has access: Anyone.
  */
 
 const CONFIG = { TZ: 'Asia/Kolkata', PROP: 'CDLBS_SHEET_ID', TAB: { CDL: 'DL-CDL', BS: 'Ban Sahayak' }, LOG: 'Change Log', CERT: 'Certificates', LISTS: 'Lists', USERS: 'Users' };
-const SESSION_HOURS = 6, MAX_FAILS = 5, LOCK_MIN = 15, CACHE_SEC = 6 * 3600, CODE_MIN = 30, HASH_ROUNDS = 500;
+const SESSION_HOURS = 6, MAX_FAILS = 5, LOCK_MIN = 15, CACHE_SEC = 6 * 3600, CODE_MIN = 30;
 const APP_NAME = 'CDL+BS Verification and Update';
-const USER_HEADERS = ['Email', 'Circle', 'Division', 'Name', 'Designation', 'Phone', 'Status', 'Signed up on', 'Last sign-in', 'Salt', 'Password hash'];
+const USER_HEADERS = ['Email', 'Circle', 'Division', 'Name', 'Designation', 'Phone', 'Status', 'Signed up on', 'Last sign-in', 'Password', 'Role'];
 
 // [key, sheet header]; the order is the column order of both people tabs. Columns are found by heading, so moving one is safe.
 const COLS = [
@@ -62,10 +62,10 @@ function doPost(e) {
     const handlers = { meta: meta_, load: load_, update: update_, confirm: confirm_, unconfirm: unconfirm_, notWorking: notWorking_,
       undoRemoval: undoRemoval_, resolveFlag: resolveFlag_, add: add_, certify: certify_,
       pending: pending_, decide: decide_, reopen: reopen_, log: log_, users: users_, userStatus: userStatus_, userPassword: userPassword_,
-      accountPassword: accountPassword_, myPassword: myPassword_ };
+      myPassword: myPassword_ };
     const fn = handlers[body.action];
     if (!fn) throw new Error('Unknown action: ' + body.action);
-    if (['pending', 'decide', 'reopen', 'log', 'users', 'userStatus', 'userPassword', 'accountPassword'].indexOf(body.action) >= 0 && !user.isAdmin) throw new Error('Only administrators can do this.');
+    if (['pending', 'decide', 'reopen', 'log', 'users', 'userStatus', 'userPassword'].indexOf(body.action) >= 0 && !user.isAdmin) throw new Error('Only administrators can do this.');
     return json_({ ok: true, data: fn(body, user) });
   } catch (err) {
     return json_({ ok: false, error: String(err && err.message || err), conflict: !!(err && err.conflict) });
@@ -75,26 +75,20 @@ function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).se
 
 /* ============================================================ auth */
 
+// Passwords are kept as plain text in the Users tab, so an admin can see and set any of them.
+// grv, user and other accounts in Config.local.gs also get a row there once a password is set from the app;
+// until then they sign in with the password from that file (the UPMC / FV one).
 function sha256hex_(s) {
   return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, s, Utilities.Charset.UTF_8)
     .map(b => ((b + 256) % 256).toString(16).padStart(2, '0')).join('');
 }
-
-/** Division users' passwords: salted SHA-256, repeated, so a copied sheet does not give the passwords away. */
-function pwHash_(salt, pw) {
-  let h = sha256hex_(salt + pw);
-  for (let i = 1; i < HASH_ROUNDS; i++) h = sha256hex_(salt + h);
-  return h;
-}
-const newSalt_ = () => Utilities.getUuid().replace(/-/g, '');
 const who_ = u => u.name + (u.desig ? ' (' + u.desig + ')' : '');
 const cleanEmail_ = s => String(s || '').trim().toLowerCase();
 const EMAIL_OK = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+/** The password written in Config.local.gs: plain (password) or, as copied from UPMC / FV, salt + hash. */
+const filePwOk_ = (acc, pw) => acc.password ? acc.password === pw : !!acc.hash && sha256hex_(acc.salt + pw) === acc.hash;
 
-/**
- * {username or email, password} -> {token, user}. Admins (Config.local.gs) sign in with their username,
- * division users with their email. Wrong attempts lock that name for LOCK_MIN minutes.
- */
+/** {username or email, password} -> {token, user}. Wrong attempts lock that name for LOCK_MIN minutes. */
 function login_(body) {
   const cache = CacheService.getScriptCache();
   const u = cleanEmail_(body.username), pw = String(body.password || '');
@@ -102,32 +96,16 @@ function login_(body) {
   const failKey = 'fail_' + u, fails = Number(cache.get(failKey) || 0);
   if (fails >= MAX_FAILS) throw new Error('Too many wrong attempts. Try again after ' + LOCK_MIN + ' minutes, or reset your password.');
   const wrong = () => { cache.put(failKey, String(fails + 1), LOCK_MIN * 60); return new Error('Wrong email or password.'); };
-  let user;
-  const acc = local_().accounts[u];
-  if (acc) {
-    if (!accountPwOk_(u, acc, pw)) throw wrong();
-    user = { name: acc.name || u, role: acc.role === 'admin' ? 'admin' : 'operator', isAdmin: acc.role === 'admin', username: u };
-    PropertiesService.getScriptProperties().setProperty('last|' + u, now_());   // shown on the admin Users page
-  } else {
-    const t = readUsers_(), r = t.rows.find(x => x.email === u);
-    if (!r || pwHash_(r.salt, pw) !== r.hash) throw wrong();
-    if (r.status !== 'Active') throw new Error('This account is disabled. Please contact the PMC admin.');
-    t.sh.getRange(r._r, USER_HEADERS.indexOf('Last sign-in') + 1).setNumberFormat('@').setValue(now_());
-    CacheService.getScriptCache().remove('off|' + u);
-    user = userOf_(r);
-  }
-  cache.remove(failKey);
-  return session_(user);
+  const t = readUsers_(), r = t.rows.find(x => x.email === u), acc = local_().accounts[u];
+  if (r && r.password) { if (r.password !== pw) throw wrong(); }
+  else if (!acc || !filePwOk_(acc, pw)) throw wrong();
+  if (r && r.status === 'Disabled') throw new Error('This account is disabled. Please contact the PMC admin.');
+  if (r) t.sh.getRange(r._r, t.at('Last sign-in') + 1).setNumberFormat('@').setValue(now_());
+  else PropertiesService.getScriptProperties().setProperty('last|' + u, now_());
+  cache.remove(failKey); cache.remove('off|' + u);
+  return session_(acc ? accountUser_(u, acc) : userOf_(r));
 }
-/**
- * Accounts in Config.local.gs (grv, user…): a password set from the app is kept in Script Properties ('pw|<username>')
- * and is used instead of the one in the file; removing it brings the file's password back.
- */
-function accountPwOk_(u, acc, pw) {
-  const o = safeJson_(PropertiesService.getScriptProperties().getProperty('pw|' + u) || '');
-  return o ? pwHash_(o.salt, pw) === o.hash : sha256hex_(acc.salt + pw) === acc.hash;
-}
-function setAccountPw_(u, pw) { const salt = newSalt_(); PropertiesService.getScriptProperties().setProperty('pw|' + u, JSON.stringify({ salt, hash: pwHash_(salt, pw) })); }
+function accountUser_(u, acc) { return { name: acc.name || u, role: acc.role === 'admin' ? 'admin' : 'operator', isAdmin: acc.role === 'admin', username: u }; }
 function userOf_(r) {
   return { name: r.name, role: 'operator', isAdmin: false, username: r.email, email: r.email, circle: r.circle, division: r.division, desig: r.desig, phone: r.phone };
 }
@@ -142,10 +120,10 @@ function authenticate_(token) {
   const cache = CacheService.getScriptCache(), s = cache.get('sess_' + token);
   if (!s) throw new Error('Your sign-in has expired. Please sign in again.');
   const user = JSON.parse(s);
-  if (user.email && cache.get('off|' + user.email)) { cache.remove('sess_' + token); throw new Error('This account is disabled. Please sign in again.'); }
+  if (cache.get('off|' + user.username)) { cache.remove('sess_' + token); throw new Error('This account is disabled. Please sign in again.'); }
   return user;
 }
-/** A division user may change only their own division (admins and the older shared accounts: any). */
+/** A division user may change only their own division (admins and the shared accounts: any). */
 function mayEdit_(user, division) {
   if (user.isAdmin || !user.division || user.division === division) return;
   throw new Error('You can change only ' + user.division + '. ' + division + ' is for its own users.');
@@ -153,22 +131,42 @@ function mayEdit_(user, division) {
 
 /* ============================================================ sign-up, password reset, users */
 
+const USER_KEYS = ['email', 'circle', 'division', 'name', 'desig', 'phone', 'status', 'on', 'last', 'password', 'role'];
+/** The Users tab (sheets made before plain passwords had Salt and Password hash columns: they are replaced). */
 function readUsers_() {
-  const sh = tab_(CONFIG.USERS), v = sh.getDataRange().getValues(), rows = [];
-  const head = (v[0] || []).map(h => String(h).trim()), at = k => head.indexOf(k);
-  const keys = ['email', 'circle', 'division', 'name', 'desig', 'phone', 'status', 'on', 'last', 'salt', 'hash'];
-  for (let r = 1; r < v.length; r++) {
-    const o = { _r: r + 1 }; keys.forEach((k, j) => { const i = at(USER_HEADERS[j]); o[k] = i < 0 ? '' : fmtTs_(v[r][i]); });
-    o.email = cleanEmail_(o.email); if (o.email) rows.push(o);
+  const sh = tab_(CONFIG.USERS);
+  let v = sh.getDataRange().getValues();
+  let head = (v[0] || []).map(h => String(h).trim());
+  if (head.indexOf('Salt') >= 0 || head.indexOf('Password') < 0) {
+    sh.getRange(1, 1, 1, Math.max(head.length, USER_HEADERS.length)).clearContent();
+    sh.getRange(1, 1, 1, USER_HEADERS.length).setValues([USER_HEADERS]).setFontWeight('bold');
+    if (v.length > 1) sh.getRange(2, 10, v.length - 1, Math.max(2, head.length - 9)).clearContent();   // old salt and hash
+    v = sh.getDataRange().getValues(); head = USER_HEADERS.slice();
   }
-  return { sh, rows };
+  const at = k => head.indexOf(k), rows = [];
+  for (let r = 1; r < v.length; r++) {
+    const o = { _r: r + 1 }; USER_KEYS.forEach((k, j) => { const i = at(USER_HEADERS[j]); o[k] = i < 0 ? '' : fmtTs_(v[r][i]); });
+    o.email = cleanEmail_(o.email); o.status = o.status || 'Active';
+    if (o.email) rows.push(o);
+  }
+  return { sh, rows, at };
+}
+/** Adds a row, or writes the given columns of an existing one. */
+function putUser_(t, email, vals) {
+  let r = t.rows.find(x => x.email === email);
+  if (!r) {
+    const row = USER_HEADERS.map(() => ''); row[0] = email;
+    t.sh.getRange(t.sh.getLastRow() + 1, 1, 1, USER_HEADERS.length).setNumberFormat('@').setValues([row]);
+    r = { _r: t.sh.getLastRow(), email }; t.rows.push(r);
+  }
+  Object.keys(vals).forEach(h => { t.sh.getRange(r._r, t.at(h) + 1).setNumberFormat('@').setValue(vals[h]); });
 }
 /** Circles and divisions for the sign-up form. */
 function lists_() { return { divisions: divisions_() }; }
 /** How many users a division already has (for the "only 1 person per division" note). */
 function divisionUsers_(body) {
   const d = String(body.division || '');
-  return { count: readUsers_().rows.filter(r => r.division === d && r.status === 'Active').length };
+  return { count: readUsers_().rows.filter(r => !r.role && r.division === d && r.status === 'Active').length };
 }
 function code6_() { return String(Math.floor(100000 + Math.random() * 900000)); }
 function mail_(to, subject, text) { MailApp.sendEmail({ to, subject, body: text, name: APP_NAME }); }
@@ -185,36 +183,34 @@ function takeCode_(key, code) {
   cache.remove(key);
   return o;
 }
+const pwCheck_ = pw => { if (String(pw || '').length < 8) throw new Error('The password must have at least 8 characters.'); return String(pw); };
 
 /** Step 1 of sign-up: checks the form and emails a 6-digit code. Nothing is saved until the code is entered. */
 function signupStart_(body) {
   const email = cleanEmail_(body.email), name = String(body.name || '').replace(/\s+/g, ' ').trim();
   const desig = String(body.desig || '').replace(/\s+/g, ' ').trim(), phone = String(body.phone || '').replace(/\D/g, '').replace(/^(91|0)(?=\d{10}$)/, '');
-  const pw = String(body.password || '');
   const div = divisions_().find(d => d.division === String(body.division || '') && d.circle === String(body.circle || ''));
   if (!div) throw new Error('Choose your circle and division.');
   if (!EMAIL_OK.test(email)) throw new Error('Write a valid email address.');
   if (name.length < 3) throw new Error('Write your name.');
   if (desig.length < 2) throw new Error('Write your designation.');
   if (!/^[6-9]\d{9}$/.test(phone)) throw new Error('Write a 10-digit mobile number.');
-  if (pw.length < 8) throw new Error('The password must have at least 8 characters.');
+  const password = pwCheck_(body.password);
   if (local_().accounts[email] || readUsers_().rows.some(r => r.email === email)) throw new Error('This email already has an account. Sign in, or use "Forgot password".');
-  const code = code6_(), salt = newSalt_();
-  CacheService.getScriptCache().put('su|' + email, JSON.stringify({ code, user: { email, circle: div.circle, division: div.division, name, desig, phone, salt, hash: pwHash_(salt, pw) } }), CODE_MIN * 60);
+  const code = code6_();
+  CacheService.getScriptCache().put('su|' + email, JSON.stringify({ code, user: { email, circle: div.circle, division: div.division, name, desig, phone, password } }), CODE_MIN * 60);
   mail_(email, APP_NAME + ': your sign-up code', 'Your sign-up code is ' + code + '.\nIt is valid for ' + CODE_MIN + ' minutes.\n\nDivision: ' + div.division + '\n\nIf you did not sign up, ignore this email.');
   return { sent: true };
 }
 /** Step 2 of sign-up: the code from the email creates the account and signs in. */
 function signupVerify_(body) {
-  const email = cleanEmail_(body.email), o = takeCode_('su|' + email, body.code), u = o.user;
+  const email = cleanEmail_(body.email), u = takeCode_('su|' + email, body.code).user;
   const lock = LockService.getScriptLock(); lock.waitLock(20000);
   try {
     const t = readUsers_();
     if (t.rows.some(r => r.email === email)) throw new Error('This email already has an account. Please sign in.');
-    const row = USER_HEADERS.map(() => ''), set = (h, v) => { row[USER_HEADERS.indexOf(h)] = v; };
-    set('Email', email); set('Circle', u.circle); set('Division', u.division); set('Name', u.name); set('Designation', u.desig); set('Phone', u.phone);
-    set('Status', 'Active'); set('Signed up on', now_()); set('Last sign-in', now_()); set('Salt', u.salt); set('Password hash', u.hash);
-    t.sh.getRange(t.sh.getLastRow() + 1, 1, 1, USER_HEADERS.length).setNumberFormat('@').setValues([row]);
+    putUser_(t, email, { 'Circle': u.circle, 'Division': u.division, 'Name': u.name, 'Designation': u.desig, 'Phone': u.phone, 'Status': 'Active',
+      'Signed up on': now_(), 'Last sign-in': now_(), 'Password': u.password });
   } finally { lock.releaseLock(); }
   return session_(userOf_(u));
 }
@@ -222,7 +218,7 @@ function signupVerify_(body) {
 function forgotStart_(body) {
   const email = cleanEmail_(body.email);
   if (!EMAIL_OK.test(email)) throw new Error('Write the email you signed up with.');
-  const r = readUsers_().rows.find(x => x.email === email && x.status === 'Active');
+  const r = readUsers_().rows.find(x => x.email === email && !x.role && x.status === 'Active');
   if (r) {
     const code = code6_();
     CacheService.getScriptCache().put('rs|' + email, JSON.stringify({ code }), CODE_MIN * 60);
@@ -232,32 +228,38 @@ function forgotStart_(body) {
 }
 /** Forgot password, step 2: the code and a new password. */
 function forgotVerify_(body) {
-  const email = cleanEmail_(body.email), pw = String(body.password || '');
-  if (pw.length < 8) throw new Error('The password must have at least 8 characters.');
+  const email = cleanEmail_(body.email), pw = pwCheck_(body.password);
   takeCode_('rs|' + email, body.code);
   setPassword_(email, pw);
   CacheService.getScriptCache().remove('fail_' + email);
   return { done: true };
 }
-function setPassword_(email, pw) {
+/** Writes a password (an account from Config.local.gs gets its row in the Users tab the first time). */
+function setPassword_(u, pw) {
   const lock = LockService.getScriptLock(); lock.waitLock(20000);
   try {
-    const t = readUsers_(), r = t.rows.find(x => x.email === email);
-    if (!r) throw new Error('No account with this email.');
-    const salt = newSalt_();
-    t.sh.getRange(r._r, USER_HEADERS.indexOf('Salt') + 1, 1, 2).setNumberFormat('@').setValues([[salt, pwHash_(salt, pw)]]);
+    const t = readUsers_(), acc = local_().accounts[u];
+    if (!acc && !t.rows.some(x => x.email === u)) throw new Error('No account with this email.');
+    const vals = { 'Password': pw };
+    if (acc && !t.rows.some(x => x.email === u)) Object.assign(vals, { 'Name': acc.name || u, 'Role': acc.role === 'admin' ? 'admin' : 'operator', 'Status': 'Active', 'Signed up on': now_() });
+    putUser_(t, u, vals);
   } finally { lock.releaseLock(); }
+  CacheService.getScriptCache().remove('fail_' + u);
 }
 
 /**
- * Admins: every division user (without password hashes) and the accounts in Config.local.gs (admins and shared ones),
- * which are not tied to a division and are changed only in that file.
+ * Admins: every division user and every account in Config.local.gs, with their passwords
+ * (an account still on its Config.local.gs password shows none: it is the UPMC / FV one).
  */
 function users_() {
-  const rows = readUsers_().rows.map(r => ({ email: r.email, circle: r.circle, division: r.division, name: r.name, desig: r.desig, phone: r.phone, status: r.status, on: r.on, last: r.last }));
-  const props = PropertiesService.getScriptProperties(), accs = local_().accounts;
-  const accounts = Object.keys(accs).map(u => ({ username: u, name: accs[u].name || u, role: accs[u].role === 'admin' ? 'admin' : 'operator',
-    last: props.getProperty('last|' + u) || '', ownPw: !!props.getProperty('pw|' + u) }));
+  const all = readUsers_().rows, accs = local_().accounts, props = PropertiesService.getScriptProperties();
+  const rows = all.filter(r => !r.role && !accs[r.email]).map(r => ({ email: r.email, circle: r.circle, division: r.division, name: r.name, desig: r.desig, phone: r.phone,
+    status: r.status, on: r.on, last: r.last, password: r.password }));
+  const accounts = Object.keys(accs).map(u => {
+    const r = all.find(x => x.email === u) || {};
+    return { username: u, name: accs[u].name || u, role: accs[u].role === 'admin' ? 'admin' : 'operator', password: r.password || '',
+      last: r.last || props.getProperty('last|' + u) || '' };
+  });
   return { rows, accounts, divisions: divisions_() };
 }
 function userStatus_(body, user) {
@@ -266,44 +268,33 @@ function userStatus_(body, user) {
   try {
     const t = readUsers_(), r = t.rows.find(x => x.email === email);
     if (!r) throw new Error('No account with this email.');
-    t.sh.getRange(r._r, USER_HEADERS.indexOf('Status') + 1).setNumberFormat('@').setValue(on ? 'Active' : 'Disabled');
+    putUser_(t, email, { 'Status': on ? 'Active' : 'Disabled' });
     if (on) CacheService.getScriptCache().remove('off|' + email); else CacheService.getScriptCache().put('off|' + email, '1', SESSION_HOURS * 3600);
     log_rows_(user, [{ circle: r.circle, division: r.division, type: on ? 'User enabled' : 'User disabled', new: r.name + ' <' + email + '>' }]);
   } finally { lock.releaseLock(); }
   return users_();
 }
-/** Admins: a new password for an account in Config.local.gs; reset: go back to the password in the file. */
-function accountPassword_(body, user) {
-  const u = cleanEmail_(body.username), acc = local_().accounts[u];
-  if (!acc) throw new Error('No such account.');
-  if (body.reset) PropertiesService.getScriptProperties().deleteProperty('pw|' + u);
-  else { const pw = String(body.password || ''); if (pw.length < 8) throw new Error('The password must have at least 8 characters.'); setAccountPw_(u, pw); }
+/** Admins: set anyone's password (a division user's email, or grv, user… from Config.local.gs). reset: an account goes back to its file password. */
+function userPassword_(body, user) {
+  const u = cleanEmail_(body.email || body.username), acc = local_().accounts[u];
+  if (body.reset) {
+    if (!acc) throw new Error('Only grv, user and the other built-in accounts have a file password to go back to.');
+    const t = readUsers_(); if (t.rows.some(x => x.email === u)) putUser_(t, u, { 'Password': '' });
+  } else setPassword_(u, pwCheck_(body.password));
   CacheService.getScriptCache().remove('fail_' + u);
-  log_rows_(user, [{ type: body.reset ? 'Password back to the one in Config.local.gs' : 'Password set by admin', new: (acc.name || u) + ' <' + u + '>' }]);
+  const r = readUsers_().rows.find(x => x.email === u) || {};
+  log_rows_(user, [{ circle: r.circle || '', division: r.division || '', type: body.reset ? 'Password back to the one in Config.local.gs' : 'Password set by admin',
+    new: (r.name || (acc && acc.name) || u) + ' <' + u + '>' }]);
   return users_();
 }
 /** Anyone signed in: change their own password (the current one is asked first). */
 function myPassword_(body, user) {
-  const cur = String(body.current || ''), pw = String(body.password || ''), u = user.username;
-  if (pw.length < 8) throw new Error('The new password must have at least 8 characters.');
-  const acc = local_().accounts[u];
-  if (acc) {
-    if (!accountPwOk_(u, acc, cur)) throw new Error('The current password is not right.');
-    setAccountPw_(u, pw);
-  } else {
-    const r = readUsers_().rows.find(x => x.email === u);
-    if (!r || pwHash_(r.salt, cur) !== r.hash) throw new Error('The current password is not right.');
-    setPassword_(u, pw);
-  }
+  const u = user.username, cur = String(body.current || ''), pw = pwCheck_(body.password);
+  const r = readUsers_().rows.find(x => x.email === u), acc = local_().accounts[u];
+  const ok = r && r.password ? r.password === cur : !!acc && filePwOk_(acc, cur);
+  if (!ok) throw new Error('The current password is not right.');
+  setPassword_(u, pw);
   log_rows_(user, [{ circle: user.circle || '', division: user.division || '', type: 'Password changed by the user', new: user.name + ' <' + u + '>' }]);
-  return { done: true };
-}
-function userPassword_(body, user) {
-  const email = cleanEmail_(body.email), pw = String(body.password || '');
-  if (pw.length < 8) throw new Error('The password must have at least 8 characters.');
-  setPassword_(email, pw);
-  const r = readUsers_().rows.find(x => x.email === email);
-  log_rows_(user, [{ circle: r.circle, division: r.division, type: 'Password set by admin', new: r.name + ' <' + email + '>' }]);
   return { done: true };
 }
 
@@ -560,7 +551,7 @@ function meta_(body, user) {
   });
   const out = { user, certs: m.certs, duty, blank, pending,
     divisions: m.divisions.map(d => ({ circle: d.circle, division: d.division, CDL: d.CDL, BS: d.BS, last: d.last })) };
-  if (user.isAdmin) { out.userCounts = {}; readUsers_().rows.forEach(r => { if (r.status === 'Active') out.userCounts[r.division] = (out.userCounts[r.division] || 0) + 1; }); }
+  if (user.isAdmin) { out.userCounts = {}; readUsers_().rows.forEach(r => { if (!r.role && r.status === 'Active') out.userCounts[r.division] = (out.userCounts[r.division] || 0) + 1; }); }
   return out;
 }
 function count0_() { return { all: 0, missing: 0, ready: 0, problem: 0, confirmed: 0, remove: 0, added: 0, changed: 0, active: 0 }; }

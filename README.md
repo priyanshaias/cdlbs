@@ -14,7 +14,7 @@ CDL+BS is separate from UPMC2 and FV. It has its own repo, Apps Script project, 
   - The sign-up page says *"Only 1 person per division. Please sign up for your own division."* If the division already has a user, it warns but still allows a second person.
   - A 6-digit code is emailed (Apps Script MailApp, from the Google account that owns the script). The account is created only when the code is entered. Codes last 30 minutes; five wrong tries and the code is gone.
   - **Forgot password** emails a code in the same way.
-  - Passwords are kept only as salted, repeated SHA-256 hashes in the **Users** tab. Five wrong sign-ins lock that email for 15 minutes.
+  - Passwords are kept as plain text in the **Users** tab, so an admin can see and set any of them (**Show passwords** on the Users page). Keep the sheet private. Five wrong sign-ins lock that email for 15 minutes.
 - **A division user can change only their own division.** They can look at others. The API enforces this, not just the screen.
 - **Admins** are in the private `Config.local.gs`, with the same usernames and passwords as UPMC2 and FV, and sign in with their username. Their **Users** page shows the users in each division (divisions with none are marked, as are those with more than 1). From there they can disable or enable a user (a disabled user is signed out at once) and set a new password. The Dashboard shows **Divisions with a user**.
 - Every change in the Change Log records the user's name, designation and division.
@@ -76,7 +76,7 @@ CDL+BS is separate from UPMC2 and FV. It has its own repo, Apps Script project, 
 
 ### Changing a password
 - **Division users:** "Forgot password" on the sign-in page, **Change my password** in their menu, or an admin sets a new one on the **Users** page.
-- **Accounts in `Config.local.gs` (grv, user…):** an admin can set a new password on the **Users** page, and anyone can use **Change my password** in their menu. That password is kept in the script's properties and applies to CDL+BS only. **Use the UPMC / FV password** brings back the one in the file. To change the file's password itself, run `makeHash('new password')` in Apps Script, copy the logged `salt` and `hash` into `Config.local.gs`, and save.
+- **Accounts in `Config.local.gs` (grv, user…):** they start with their UPMC / FV password. An admin can set a new one on the **Users** page (it is then kept as plain text in the Users tab and applies to CDL+BS only), and anyone can use **Change my password** in their menu. **Use the UPMC / FV password** brings back the one in the file.
 
 ## Files
 - `docs/`: the website (GitHub Pages). `js/config.js` holds the API address, `js/api.js` talks to it, `js/store.js` holds the data and rules, and `js/app.js` draws the screens.

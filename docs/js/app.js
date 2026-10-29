@@ -591,7 +591,7 @@
 
   /* ------------------------------------------------------------ admin: users */
   let usersData = null;
-  const usersUi = { filter: 'everyone', open: '' };
+  const usersUi = { filter: 'everyone', open: '', showPw: false };
   async function loadUsers() { usersData = await S.api.call('users'); }
   function usersPage() {
     const by = {}; usersData.rows.forEach(u => (by[u.division] = by[u.division] || []).push(u));
@@ -606,7 +606,7 @@
         <div class="kpi"><div class="v num" style="color:var(--warn-ink)">${none.length}</div><div class="l">Divisions with no user</div></div>
         <div class="kpi"><div class="v num">${many.length}</div><div class="l">Divisions with more than 1</div></div></div>
       ${accountsCard()}
-      <div class="chips">${chip('everyone', 'Every division user', usersData.rows.length)}${chip('all', 'By division', ds.length)}${chip('none', 'No user yet', none.length)}${chip('many', 'More than 1', many.length)}</div>
+      <div class="chips"><button class="chip ${usersUi.showPw ? 'on' : ''}" data-act="u-showpw" style="margin-right:8px">${usersUi.showPw ? 'Hide passwords' : 'Show passwords'}</button>${chip('everyone', 'Every division user', usersData.rows.length)}${chip('all', 'By division', ds.length)}${chip('none', 'No user yet', none.length)}${chip('many', 'More than 1', many.length)}</div>
       ${usersUi.filter === 'everyone' ? everyoneCard() : `
       <div class="card"><div style="overflow-x:auto"><table class="plain users"><thead><tr><th>Division</th><th>Users</th><th>Who</th></tr></thead><tbody>
       ${show.map(d => {
@@ -616,32 +616,34 @@
           <td>${list.length ? list.map(u => `${esc(u.name)} <span class="faint">${esc(u.desig)}${u.status !== 'Active' ? ' · disabled' : ''}</span>`).join('<br>') : '<span class="faint">No one has signed up yet</span>'}</td></tr>
           ${open ? list.map(u => `<tr class="u-detail"><td colspan="3"><div class="row" style="justify-content:space-between;align-items:flex-start">
             <div><b>${esc(u.name)}</b>, ${esc(u.desig)} ${u.status === 'Active' ? '<span class="pill confirmed">Active</span>' : '<span class="pill remove">Disabled</span>'}
-              <div class="faint">${esc(u.email)} · ${esc(u.phone)} · signed up ${esc(u.on)} · last sign-in ${esc(u.last || '—')}</div></div>
+              <div class="faint">${esc(u.email)} · ${esc(u.phone)} · password ${pwCell(u.password) || 'not set'} · signed up ${esc(u.on)} · last sign-in ${esc(u.last || '—')}</div></div>
             <div class="row" style="flex-wrap:nowrap">${u.status === 'Active' ? `<button class="btn sm danger" data-act="u-status" data-v="off" data-email="${esc(u.email)}">Disable</button>` : `<button class="btn sm" data-act="u-status" data-v="on" data-email="${esc(u.email)}">Enable</button>`}
               <button class="btn sm" data-act="u-pass" data-email="${esc(u.email)}">Set a new password</button></div></div></td></tr>`).join('') : ''}`;
       }).join('')}</tbody></table></div></div>`}`;
   }
-  // admins and shared accounts from Config.local.gs: not tied to a division, changed only in that file
+  const pwCell = pw => pw ? (usersUi.showPw ? `<code class="pw">${esc(pw)}</code>` : '<span class="faint">••••••••</span>') : '';
+  // admins and shared accounts from Config.local.gs
   function accountsCard() {
     const list = usersData.accounts || [];
     if (!list.length) return '';
     return `<div class="card" style="margin-bottom:16px"><h2>Admin and shared accounts</h2>
-      <p class="faint" style="margin:2px 0 10px">Set up in Config.local.gs, with the same passwords as UPMC and FV. A password set here applies to CDL+BS only.</p>
-      <div style="overflow-x:auto"><table class="plain"><thead><tr><th>Username</th><th>Name</th><th>Can do</th><th>Last sign-in</th><th></th></tr></thead><tbody>
+      <p class="faint" style="margin:2px 0 10px">Until you set a password here, these use their UPMC / FV password. A password set here applies to CDL+BS only.</p>
+      <div style="overflow-x:auto"><table class="plain"><thead><tr><th>Username</th><th>Name</th><th>Can do</th><th>Password</th><th>Last sign-in</th><th></th></tr></thead><tbody>
       ${list.map(a => `<tr><td><b>${esc(a.username)}</b></td><td>${esc(a.name)}</td>
         <td>${a.role === 'admin' ? '<span class="pill confirmed">Admin</span> <span class="faint">everything, all divisions</span>' : '<span class="pill ready">Shared operator</span> <span class="faint">edit any division</span>'}</td>
-        <td class="faint">${esc(a.last || 'Not yet')}${a.ownPw ? '<div><span class="pill ready">Password set here</span></div>' : ''}</td>
+        <td>${a.password ? pwCell(a.password) : '<span class="faint">UPMC / FV password</span>'}</td>
+        <td class="faint">${esc(a.last || 'Not yet')}</td>
         <td><div class="row" style="flex-wrap:nowrap"><button class="btn sm" data-act="a-pass" data-user="${esc(a.username)}">Set a new password</button>
-          ${a.ownPw ? `<button class="btn sm ghost" data-act="a-reset" data-user="${esc(a.username)}" title="Go back to the password in Config.local.gs (the UPMC / FV one)">Use the UPMC / FV password</button>` : ''}</div></td></tr>`).join('')}</tbody></table></div></div>`;
+          ${a.password ? `<button class="btn sm ghost" data-act="a-reset" data-user="${esc(a.username)}" title="Go back to the password in Config.local.gs (the UPMC / FV one)">Use the UPMC / FV password</button>` : ''}</div></td></tr>`).join('')}</tbody></table></div></div>`;
   }
   // every division user in one list, newest first
   function everyoneCard() {
     const when = s => { const m = /^(\d{2})-(\d{2})-(\d{4})\s*(.*)$/.exec(s || ''); return m ? m[3] + m[2] + m[1] + m[4] : ''; };
     const list = usersData.rows.slice().sort((a, b) => when(b.on).localeCompare(when(a.on)));
     if (!list.length) return '<div class="card"><p class="muted" style="margin:0">No one has signed up yet.</p></div>';
-    return `<div class="card"><div style="overflow-x:auto"><table class="plain"><thead><tr><th>Name</th><th>Division</th><th>Email · Mobile</th><th>Signed up</th><th>Last sign-in</th><th></th></tr></thead><tbody>
+    return `<div class="card"><div style="overflow-x:auto"><table class="plain"><thead><tr><th>Name</th><th>Division</th><th>Email · Mobile</th><th>Password</th><th>Signed up</th><th>Last sign-in</th><th></th></tr></thead><tbody>
       ${list.map(u => `<tr><td><b>${esc(u.name)}</b><div class="faint">${esc(u.desig)}</div></td><td>${esc(u.division)}<div class="faint">${esc(u.circle)}</div></td>
-        <td>${esc(u.email)}<div class="faint">${esc(u.phone)}</div></td><td class="faint">${esc(u.on)}</td><td class="faint">${esc(u.last || '—')}</td>
+        <td>${esc(u.email)}<div class="faint">${esc(u.phone)}</div></td><td>${pwCell(u.password) || '<span class="faint">not set</span>'}</td><td class="faint">${esc(u.on)}</td><td class="faint">${esc(u.last || '—')}</td>
         <td><div class="row" style="flex-wrap:nowrap">${u.status === 'Active' ? `<button class="btn sm danger" data-act="u-status" data-v="off" data-email="${esc(u.email)}">Disable</button>` : `<button class="btn sm" data-act="u-status" data-v="on" data-email="${esc(u.email)}">Enable</button>`}
           <button class="btn sm" data-act="u-pass" data-email="${esc(u.email)}">Set password</button></div></td></tr>`).join('')}</tbody></table></div></div>`;
   }
@@ -651,7 +653,7 @@
   }
   // account: a username from Config.local.gs (grv, user…) rather than a division user's email
   function userPassModal(email, account) {
-    openModal(`<h2>Set a new password</h2><p class="muted">For <b>${esc(email)}</b>. ${account ? 'It applies to CDL+BS only; UPMC and FV keep their password.' : 'Tell them the new password; they can change it later with “Forgot password”.'}</p>
+    openModal(`<h2>Set a new password</h2><p class="muted">For <b>${esc(email)}</b>. ${account ? 'It applies to CDL+BS only; UPMC and FV keep their password.' : 'Tell them the new password.'} You can see it on this page later.</p>
       <div class="field"><label for="upw">New password <span class="faint">(8+ characters)</span></label><input type="text" id="upw" autocomplete="off"></div>
       <div class="acts"><button class="btn" data-act="mclose">Cancel</button><button class="btn primary" data-act="u-pass-ok" data-email="${esc(email)}" ${account ? 'data-account="1"' : ''}>Set password</button></div>`);
     setTimeout(() => $('#upw').focus(), 50);
@@ -660,13 +662,12 @@
     const pw = $('#upw').value;
     if (pw.length < 8) { toast('At least 8 characters'); return; }
     try {
-      if (account) usersData = await S.api.call('accountPassword', { username: email, password: pw });
-      else await S.api.call('userPassword', { email, password: pw });
-      closeModal(); toast('Password set'); if (account) render();
+      usersData = await S.api.call('userPassword', { email, password: pw });
+      closeModal(); toast('Password set'); render();
     } catch (x) { toast(x.message); }
   }
   async function accountReset(u) {
-    try { usersData = await S.api.call('accountPassword', { username: u, reset: true }); toast(u + ' uses the UPMC / FV password again'); render(); }
+    try { usersData = await S.api.call('userPassword', { email: u, reset: true }); toast(u + ' uses the UPMC / FV password again'); render(); }
     catch (x) { toast(x.message); }
   }
   // anyone signed in (live): their own password
@@ -828,6 +829,7 @@
       case 'retry': render(); break;
       case 'auth': e.preventDefault(); auth.view = t.dataset.v; auth.msg = ''; render(); break;
       case 'resend': e.preventDefault(); authSubmit(null, 'resend'); break;
+      case 'u-showpw': usersUi.showPw = !usersUi.showPw; render(); break;
       case 'u-filter': usersUi.filter = t.dataset.v; render(); break;
       case 'u-open': usersUi.open = usersUi.open === t.dataset.v ? '' : t.dataset.v; render(); break;
       case 'u-status': userStatus(t.dataset.email, t.dataset.v === 'on'); break;

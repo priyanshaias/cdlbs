@@ -364,3 +364,5 @@ table.plain { width: 100%; border-collapse: collapse; font-size: 14px; }
 @keyframes sh { to { background-position: -200% 0; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .loader .canopy, .loader .trunk { stroke-dashoffset: 0; animation: none; } .ibar i, .skeleton, .btn .spin { animation: none; } }
+
+.pw { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; background: var(--surface-sunken); padding: 2px 6px; border-radius: 5px; color: var(--ink); }
