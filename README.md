@@ -75,8 +75,8 @@ CDL+BS is separate from UPMC2 and FV. It has its own repo, Apps Script project, 
 3. **Deploy → Manage deployments → ✏️ → Version: New version → Deploy**, so the `/exec` URL stays the same. To roll back, choose the earlier version there.
 
 ### Changing a password
-- **Division users:** "Forgot password" on the sign-in page, or an admin sets a new one on the **Users** page.
-- **Admins:** in Apps Script, run `makeHash('new password')`, copy the logged `salt` and `hash` into `Config.local.gs`, and save. No redeploy is needed. Keep it the same as in UPMC2 and FV.
+- **Division users:** "Forgot password" on the sign-in page, **Change my password** in their menu, or an admin sets a new one on the **Users** page.
+- **Accounts in `Config.local.gs` (grv, user…):** an admin can set a new password on the **Users** page, and anyone can use **Change my password** in their menu. That password is kept in the script's properties and applies to CDL+BS only. **Use the UPMC / FV password** brings back the one in the file. To change the file's password itself, run `makeHash('new password')` in Apps Script, copy the logged `salt` and `hash` into `Config.local.gs`, and save.
 
 ## Files
 - `docs/`: the website (GitHub Pages). `js/config.js` holds the API address, `js/api.js` talks to it, `js/store.js` holds the data and rules, and `js/app.js` draws the screens.

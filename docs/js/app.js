@@ -54,7 +54,7 @@
     const u = S.user, m = $('#who .menu');
     if (m) { m.remove(); return; }
     $('#who').insertAdjacentHTML('beforeend', `<div class="menu"><div class="who-line"><b>${esc(u.name)}</b>${u.role === 'admin' ? 'Admin' : u.division ? esc(u.division) : 'Division operator'}${S.LIVE ? '' : ' · demo'}</div>
-      ${S.LIVE ? '' : '<button data-act="reset">Reset the demo</button>'}<button data-act="signout">Sign out</button></div>`);
+      ${S.LIVE ? '<button data-act="my-pass">Change my password</button>' : '<button data-act="reset">Reset the demo</button>'}<button data-act="signout">Sign out</button></div>`);
   }
 
   /* ------------------------------------------------------------ login */
@@ -626,11 +626,13 @@
     const list = usersData.accounts || [];
     if (!list.length) return '';
     return `<div class="card" style="margin-bottom:16px"><h2>Admin and shared accounts</h2>
-      <p class="faint" style="margin:2px 0 10px">Kept in Config.local.gs in Apps Script, the same as UPMC and FV. To change a password, run makeHash there.</p>
-      <div style="overflow-x:auto"><table class="plain"><thead><tr><th>Username</th><th>Name</th><th>Can do</th><th>Last sign-in</th></tr></thead><tbody>
+      <p class="faint" style="margin:2px 0 10px">Set up in Config.local.gs, with the same passwords as UPMC and FV. A password set here applies to CDL+BS only.</p>
+      <div style="overflow-x:auto"><table class="plain"><thead><tr><th>Username</th><th>Name</th><th>Can do</th><th>Last sign-in</th><th></th></tr></thead><tbody>
       ${list.map(a => `<tr><td><b>${esc(a.username)}</b></td><td>${esc(a.name)}</td>
         <td>${a.role === 'admin' ? '<span class="pill confirmed">Admin</span> <span class="faint">everything, all divisions</span>' : '<span class="pill ready">Shared operator</span> <span class="faint">edit any division</span>'}</td>
-        <td class="faint">${esc(a.last || 'Not yet')}</td></tr>`).join('')}</tbody></table></div></div>`;
+        <td class="faint">${esc(a.last || 'Not yet')}${a.ownPw ? '<div><span class="pill ready">Password set here</span></div>' : ''}</td>
+        <td><div class="row" style="flex-wrap:nowrap"><button class="btn sm" data-act="a-pass" data-user="${esc(a.username)}">Set a new password</button>
+          ${a.ownPw ? `<button class="btn sm ghost" data-act="a-reset" data-user="${esc(a.username)}" title="Go back to the password in Config.local.gs (the UPMC / FV one)">Use the UPMC / FV password</button>` : ''}</div></td></tr>`).join('')}</tbody></table></div></div>`;
   }
   // every division user in one list, newest first
   function everyoneCard() {
@@ -647,17 +649,43 @@
     try { usersData = await S.api.call('userStatus', { email, active: on }); toast(on ? 'User enabled' : 'User disabled; they are signed out'); render(); }
     catch (x) { toast(x.message); }
   }
-  function userPassModal(email) {
-    openModal(`<h2>Set a new password</h2><p class="muted">For ${esc(email)}. Tell them the new password; they can change it later with “Forgot password”.</p>
+  // account: a username from Config.local.gs (grv, user…) rather than a division user's email
+  function userPassModal(email, account) {
+    openModal(`<h2>Set a new password</h2><p class="muted">For <b>${esc(email)}</b>. ${account ? 'It applies to CDL+BS only; UPMC and FV keep their password.' : 'Tell them the new password; they can change it later with “Forgot password”.'}</p>
       <div class="field"><label for="upw">New password <span class="faint">(8+ characters)</span></label><input type="text" id="upw" autocomplete="off"></div>
-      <div class="acts"><button class="btn" data-act="mclose">Cancel</button><button class="btn primary" data-act="u-pass-ok" data-email="${esc(email)}">Set password</button></div>`);
+      <div class="acts"><button class="btn" data-act="mclose">Cancel</button><button class="btn primary" data-act="u-pass-ok" data-email="${esc(email)}" ${account ? 'data-account="1"' : ''}>Set password</button></div>`);
     setTimeout(() => $('#upw').focus(), 50);
   }
-  async function userPassSave(email) {
+  async function userPassSave(email, account) {
     const pw = $('#upw').value;
     if (pw.length < 8) { toast('At least 8 characters'); return; }
-    try { await S.api.call('userPassword', { email, password: pw }); closeModal(); toast('Password set'); }
+    try {
+      if (account) usersData = await S.api.call('accountPassword', { username: email, password: pw });
+      else await S.api.call('userPassword', { email, password: pw });
+      closeModal(); toast('Password set'); if (account) render();
+    } catch (x) { toast(x.message); }
+  }
+  async function accountReset(u) {
+    try { usersData = await S.api.call('accountPassword', { username: u, reset: true }); toast(u + ' uses the UPMC / FV password again'); render(); }
     catch (x) { toast(x.message); }
+  }
+  // anyone signed in (live): their own password
+  function myPassModal() {
+    openModal(`<h2>Change my password</h2><p class="muted">${esc(S.user.name)} · ${esc(S.user.username)}</p>
+      <div class="field"><label for="mpc">Current password</label><input type="password" id="mpc" autocomplete="current-password"></div>
+      <div class="two"><div class="field"><label for="mpn">New password <span class="faint">(8+ characters)</span></label><input type="password" id="mpn" autocomplete="new-password"></div>
+        <div class="field"><label for="mpn2">New password again</label><input type="password" id="mpn2" autocomplete="new-password"></div></div>
+      <div class="err" id="mperr" role="alert"></div>
+      <div class="acts"><button class="btn" data-act="mclose">Cancel</button><button class="btn primary" data-act="my-pass-ok">Change password</button></div>`);
+    setTimeout(() => $('#mpc').focus(), 50);
+  }
+  async function myPassSave(btn) {
+    const er = $('#mperr'), n = $('#mpn').value;
+    if (n.length < 8) { er.textContent = 'The new password must have at least 8 characters.'; return; }
+    if (n !== $('#mpn2').value) { er.textContent = 'The two new passwords are not the same.'; return; }
+    btn.disabled = true;
+    try { await S.api.call('myPassword', { current: $('#mpc').value, password: n }); closeModal(); toast('Your password has been changed'); }
+    catch (x) { er.textContent = x.message; btn.disabled = false; }
   }
 
   /* ------------------------------------------------------------ admin screens */
@@ -804,7 +832,11 @@
       case 'u-open': usersUi.open = usersUi.open === t.dataset.v ? '' : t.dataset.v; render(); break;
       case 'u-status': userStatus(t.dataset.email, t.dataset.v === 'on'); break;
       case 'u-pass': userPassModal(t.dataset.email); break;
-      case 'u-pass-ok': userPassSave(t.dataset.email); break;
+      case 'u-pass-ok': userPassSave(t.dataset.email, !!t.dataset.account); break;
+      case 'a-pass': userPassModal(t.dataset.user, true); break;
+      case 'a-reset': accountReset(t.dataset.user); break;
+      case 'my-pass': $('#who .menu') && $('#who .menu').remove(); myPassModal(); break;
+      case 'my-pass-ok': myPassSave(t); break;
       case 'as-op': S.signIn({ role: 'operator', name: 'Demo Operator' }); location.hash = '#/'; render(); break;
       case 'as-admin': S.signIn({ role: 'admin', name: 'Demo Admin' }); location.hash = '#/'; render(); break;
       case 'cadre': if (ui.cadre !== t.dataset.v) { ui.cadre = t.dataset.v; remember('cdl-cadre', ui.cadre); Object.assign(ui, { filter: 'all', range: '', q: '', edit: null, keep: new Set() }); render(); } break;

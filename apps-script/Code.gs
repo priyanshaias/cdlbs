@@ -61,10 +61,11 @@ function doPost(e) {
     const user = authenticate_(body.token);
     const handlers = { meta: meta_, load: load_, update: update_, confirm: confirm_, unconfirm: unconfirm_, notWorking: notWorking_,
       undoRemoval: undoRemoval_, resolveFlag: resolveFlag_, add: add_, certify: certify_,
-      pending: pending_, decide: decide_, reopen: reopen_, log: log_, users: users_, userStatus: userStatus_, userPassword: userPassword_ };
+      pending: pending_, decide: decide_, reopen: reopen_, log: log_, users: users_, userStatus: userStatus_, userPassword: userPassword_,
+      accountPassword: accountPassword_, myPassword: myPassword_ };
     const fn = handlers[body.action];
     if (!fn) throw new Error('Unknown action: ' + body.action);
-    if (['pending', 'decide', 'reopen', 'log', 'users', 'userStatus', 'userPassword'].indexOf(body.action) >= 0 && !user.isAdmin) throw new Error('Only administrators can do this.');
+    if (['pending', 'decide', 'reopen', 'log', 'users', 'userStatus', 'userPassword', 'accountPassword'].indexOf(body.action) >= 0 && !user.isAdmin) throw new Error('Only administrators can do this.');
     return json_({ ok: true, data: fn(body, user) });
   } catch (err) {
     return json_({ ok: false, error: String(err && err.message || err), conflict: !!(err && err.conflict) });
@@ -104,7 +105,7 @@ function login_(body) {
   let user;
   const acc = local_().accounts[u];
   if (acc) {
-    if (sha256hex_(acc.salt + pw) !== acc.hash) throw wrong();
+    if (!accountPwOk_(u, acc, pw)) throw wrong();
     user = { name: acc.name || u, role: acc.role === 'admin' ? 'admin' : 'operator', isAdmin: acc.role === 'admin', username: u };
     PropertiesService.getScriptProperties().setProperty('last|' + u, now_());   // shown on the admin Users page
   } else {
@@ -118,6 +119,15 @@ function login_(body) {
   cache.remove(failKey);
   return session_(user);
 }
+/**
+ * Accounts in Config.local.gs (grv, user…): a password set from the app is kept in Script Properties ('pw|<username>')
+ * and is used instead of the one in the file; removing it brings the file's password back.
+ */
+function accountPwOk_(u, acc, pw) {
+  const o = safeJson_(PropertiesService.getScriptProperties().getProperty('pw|' + u) || '');
+  return o ? pwHash_(o.salt, pw) === o.hash : sha256hex_(acc.salt + pw) === acc.hash;
+}
+function setAccountPw_(u, pw) { const salt = newSalt_(); PropertiesService.getScriptProperties().setProperty('pw|' + u, JSON.stringify({ salt, hash: pwHash_(salt, pw) })); }
 function userOf_(r) {
   return { name: r.name, role: 'operator', isAdmin: false, username: r.email, email: r.email, circle: r.circle, division: r.division, desig: r.desig, phone: r.phone };
 }
@@ -246,7 +256,8 @@ function setPassword_(email, pw) {
 function users_() {
   const rows = readUsers_().rows.map(r => ({ email: r.email, circle: r.circle, division: r.division, name: r.name, desig: r.desig, phone: r.phone, status: r.status, on: r.on, last: r.last }));
   const props = PropertiesService.getScriptProperties(), accs = local_().accounts;
-  const accounts = Object.keys(accs).map(u => ({ username: u, name: accs[u].name || u, role: accs[u].role === 'admin' ? 'admin' : 'operator', last: props.getProperty('last|' + u) || '' }));
+  const accounts = Object.keys(accs).map(u => ({ username: u, name: accs[u].name || u, role: accs[u].role === 'admin' ? 'admin' : 'operator',
+    last: props.getProperty('last|' + u) || '', ownPw: !!props.getProperty('pw|' + u) }));
   return { rows, accounts, divisions: divisions_() };
 }
 function userStatus_(body, user) {
@@ -260,6 +271,32 @@ function userStatus_(body, user) {
     log_rows_(user, [{ circle: r.circle, division: r.division, type: on ? 'User enabled' : 'User disabled', new: r.name + ' <' + email + '>' }]);
   } finally { lock.releaseLock(); }
   return users_();
+}
+/** Admins: a new password for an account in Config.local.gs; reset: go back to the password in the file. */
+function accountPassword_(body, user) {
+  const u = cleanEmail_(body.username), acc = local_().accounts[u];
+  if (!acc) throw new Error('No such account.');
+  if (body.reset) PropertiesService.getScriptProperties().deleteProperty('pw|' + u);
+  else { const pw = String(body.password || ''); if (pw.length < 8) throw new Error('The password must have at least 8 characters.'); setAccountPw_(u, pw); }
+  CacheService.getScriptCache().remove('fail_' + u);
+  log_rows_(user, [{ type: body.reset ? 'Password back to the one in Config.local.gs' : 'Password set by admin', new: (acc.name || u) + ' <' + u + '>' }]);
+  return users_();
+}
+/** Anyone signed in: change their own password (the current one is asked first). */
+function myPassword_(body, user) {
+  const cur = String(body.current || ''), pw = String(body.password || ''), u = user.username;
+  if (pw.length < 8) throw new Error('The new password must have at least 8 characters.');
+  const acc = local_().accounts[u];
+  if (acc) {
+    if (!accountPwOk_(u, acc, cur)) throw new Error('The current password is not right.');
+    setAccountPw_(u, pw);
+  } else {
+    const r = readUsers_().rows.find(x => x.email === u);
+    if (!r || pwHash_(r.salt, cur) !== r.hash) throw new Error('The current password is not right.');
+    setPassword_(u, pw);
+  }
+  log_rows_(user, [{ circle: user.circle || '', division: user.division || '', type: 'Password changed by the user', new: user.name + ' <' + u + '>' }]);
+  return { done: true };
 }
 function userPassword_(body, user) {
   const email = cleanEmail_(body.email), pw = String(body.password || '');
