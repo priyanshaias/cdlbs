@@ -504,7 +504,7 @@
         ${f('su-email', 'Email <span class="faint">(you will sign in with it)</span>', 'email', `autocomplete="email" value="${esc(ff.email || '')}"`)}
         ${f('su-name', 'Your name', 'text', `autocomplete="name" value="${esc(ff.name || '')}"`)}
         <div class="two">${f('su-desig', 'Designation', 'text', `value="${esc(ff.desig || '')}" placeholder="e.g. Head Clerk"`)}${f('su-phone', 'Mobile number', 'tel', `autocomplete="tel" inputmode="numeric" value="${esc(ff.phone || '')}"`)}</div>
-        <div class="two">${f('su-pw', 'Password <span class="faint">(8+ characters)</span>', 'password', 'autocomplete="new-password"')}${f('su-pw2', 'Password again', 'password', 'autocomplete="new-password"')}</div>`,
+        <div class="two">${f('su-pw', 'Password', 'password', 'autocomplete="new-password"')}${f('su-pw2', 'Password again', 'password', 'autocomplete="new-password"')}</div>`,
         'signup', 'Send me a code') + `<p class="alt">Already have an account? <a href="#" data-act="auth" data-v="signin">Sign in</a></p></form>`;
       if (ff.division) authFormChange($('#su-division'));
       return;
@@ -519,7 +519,7 @@
     } else if (v === 'reset') {
       app.innerHTML = card('Set a new password', `If <b>${esc(auth.email)}</b> has an account, a code is on its way. It may be in the spam folder.`,
         f('code', 'Code', 'text', 'inputmode="numeric" autocomplete="one-time-code" maxlength="6"') +
-        `<div class="two">${f('rs-pw', 'New password <span class="faint">(8+ characters)</span>', 'password', 'autocomplete="new-password"')}${f('rs-pw2', 'New password again', 'password', 'autocomplete="new-password"')}</div>`, 'reset', 'Set the new password')
+        `<div class="two">${f('rs-pw', 'New password', 'password', 'autocomplete="new-password"')}${f('rs-pw2', 'New password again', 'password', 'autocomplete="new-password"')}</div>`, 'reset', 'Set the new password')
         + `<p class="alt"><a href="#" data-act="auth" data-v="forgot">Send a new code</a> · <a href="#" data-act="auth" data-v="signin">Back to sign in</a></p></form>`;
     } else {
       app.innerHTML = card('Sign in', 'DL / CDL and Ban Sahayak details and duties, division by division.',
@@ -654,13 +654,13 @@
   // account: a username from Config.local.gs (grv, user…) rather than a division user's email
   function userPassModal(email, account) {
     openModal(`<h2>Set a new password</h2><p class="muted">For <b>${esc(email)}</b>. ${account ? 'It applies to CDL+BS only; UPMC and FV keep their password.' : 'Tell them the new password.'} You can see it on this page later.</p>
-      <div class="field"><label for="upw">New password <span class="faint">(8+ characters)</span></label><input type="text" id="upw" autocomplete="off"></div>
+      <div class="field"><label for="upw">New password</label><input type="text" id="upw" autocomplete="off"></div>
       <div class="acts"><button class="btn" data-act="mclose">Cancel</button><button class="btn primary" data-act="u-pass-ok" data-email="${esc(email)}" ${account ? 'data-account="1"' : ''}>Set password</button></div>`);
     setTimeout(() => $('#upw').focus(), 50);
   }
   async function userPassSave(email, account) {
     const pw = $('#upw').value;
-    if (pw.length < 8) { toast('At least 8 characters'); return; }
+    if (!pw) { toast('Write a password'); return; }
     try {
       usersData = await S.api.call('userPassword', { email, password: pw });
       closeModal(); toast('Password set'); render();
@@ -674,7 +674,7 @@
   function myPassModal() {
     openModal(`<h2>Change my password</h2><p class="muted">${esc(S.user.name)} · ${esc(S.user.username)}</p>
       <div class="field"><label for="mpc">Current password</label><input type="password" id="mpc" autocomplete="current-password"></div>
-      <div class="two"><div class="field"><label for="mpn">New password <span class="faint">(8+ characters)</span></label><input type="password" id="mpn" autocomplete="new-password"></div>
+      <div class="two"><div class="field"><label for="mpn">New password</label><input type="password" id="mpn" autocomplete="new-password"></div>
         <div class="field"><label for="mpn2">New password again</label><input type="password" id="mpn2" autocomplete="new-password"></div></div>
       <div class="err" id="mperr" role="alert"></div>
       <div class="acts"><button class="btn" data-act="mclose">Cancel</button><button class="btn primary" data-act="my-pass-ok">Change password</button></div>`);
@@ -682,7 +682,7 @@
   }
   async function myPassSave(btn) {
     const er = $('#mperr'), n = $('#mpn').value;
-    if (n.length < 8) { er.textContent = 'The new password must have at least 8 characters.'; return; }
+    if (!n) { er.textContent = 'Write the new password.'; return; }
     if (n !== $('#mpn2').value) { er.textContent = 'The two new passwords are not the same.'; return; }
     btn.disabled = true;
     try { await S.api.call('myPassword', { current: $('#mpc').value, password: n }); closeModal(); toast('Your password has been changed'); }

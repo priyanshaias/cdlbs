@@ -183,7 +183,7 @@ function takeCode_(key, code) {
   cache.remove(key);
   return o;
 }
-const pwCheck_ = pw => { if (String(pw || '').length < 8) throw new Error('The password must have at least 8 characters.'); return String(pw); };
+const pwCheck_ = pw => { if (!String(pw || '')) throw new Error('Write a password.'); return String(pw); };   // any length
 
 /** Step 1 of sign-up: checks the form and emails a 6-digit code. Nothing is saved until the code is entered. */
 function signupStart_(body) {
