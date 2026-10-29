@@ -82,7 +82,7 @@ main { max-width: var(--container); margin: 0 auto; padding: 24px 20px 140px; }
 .field { display: grid; gap: 5px; margin-bottom: 14px; }
 .field > label, .field > .lab { font-size: 13px; font-weight: 700; color: var(--text-strong); }
 .field .req { color: var(--bad); }
-input[type=text], input[type=number], input[type=date], input[type=search], select, textarea {
+input[type=text], input[type=number], input[type=date], input[type=search], input[type=email], input[type=password], input[type=tel], select, textarea {
   width: 100%; min-height: 42px; border: 1px solid var(--border-strong); border-radius: var(--r9); padding: 8px 11px; background: #fff; font-size: 15px; }
 textarea { min-height: 70px; resize: vertical; }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
@@ -354,3 +354,54 @@ table.plain { width: 100%; border-collapse: collapse; font-size: 14px; }
 @keyframes sh { to { background-position: -200% 0; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .loader .canopy, .loader .trunk { stroke-dashoffset: 0; animation: none; } .ibar i, .skeleton, .btn .spin { animation: none; } }
+
+/* ---------- front page: forest panel beside the sign-in card ---------- */
+.front { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(340px, 470px); grid-template-areas: "top card" "more card";
+  column-gap: 32px; margin: 26px 0 8px; align-items: start; }
+.hero { --leaf: #bfe5c8; color: #e4f3e8; padding: 34px 38px 0; }
+/* one top-to-bottom gradient split across the two halves, so they meet without a seam */
+.hero-top { background: linear-gradient(180deg, #0d361f, #134629); }
+.hero-more { background: linear-gradient(180deg, #134629, #1e6a37); }
+.hero-top { grid-area: top; border-radius: 22px 22px 0 0; }
+.hero-more { grid-area: more; border-radius: 0 0 22px 22px; position: relative; overflow: hidden; padding-bottom: 0; }
+.front-card { grid-area: card; align-self: center; padding: 18px 0; }
+.front-card .login { margin: 0; max-width: none; box-shadow: var(--shadow-window); border-radius: var(--r16); }
+.front-card .loader { margin: 0; box-shadow: var(--shadow-window); }
+.hero .eyebrow { display: inline-flex; align-items: center; gap: 10px; font-size: 12.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--leaf); }
+.hero .eyebrow img { width: 30px; height: 30px; padding: 4px; background: #fff; border-radius: 50%; }
+.hero h1 { color: #fff; font-size: 42px; line-height: 1.04; letter-spacing: -.035em; margin: 18px 0 0; }
+.hero h1 span { display: block; color: var(--leaf); font-weight: 700; font-size: .72em; letter-spacing: -.025em; margin-top: 6px; }
+.hero .lede { font-size: 17px; line-height: 1.55; max-width: 520px; margin: 16px 0 0; color: #d6ecdc; }
+.hero .cadres { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 26px; }
+.hero .cad { background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.14); border-radius: 14px; padding: 14px 16px; }
+.hero .cad b { display: block; color: #fff; font-size: 15px; margin-bottom: 4px; }
+.hero .cad span { font-size: 13.5px; line-height: 1.45; color: #cfe7d6; }
+.hero .how { list-style: none; padding: 0; margin: 24px 0 0; display: grid; gap: 14px; }
+.hero .how li { display: flex; gap: 12px; align-items: flex-start; font-size: 14px; line-height: 1.45; color: #cfe7d6; }
+.hero .how i { flex: none; width: 28px; height: 28px; border-radius: 50%; background: #fff; color: #17582e; font-style: normal; font-weight: 800; display: grid; place-items: center; font-size: 14px; }
+.hero .how b { display: block; color: #fff; font-size: 15px; }
+.hero .help-line { margin: 24px 0 0; font-size: 13.5px; color: #cfe7d6; }
+.hero .help-line b { color: #fff; } .hero .help-line a { color: #fff; font-weight: 700; }
+.hero .treeline { display: block; width: calc(100% + 76px); height: 74px; margin: 18px -38px 0; fill: #0a2c19; opacity: .9; }
+/* a gentle entrance, one part after another */
+.hero > *, .front-card { animation: up .55s cubic-bezier(.2,.8,.2,1) both; }
+.hero-top .eyebrow { animation-delay: .02s; } .hero-top h1 { animation-delay: .08s; } .hero-top .lede { animation-delay: .14s; }
+.front-card { animation-delay: .18s; }
+.hero-more .cadres { animation-delay: .24s; } .hero-more .how { animation-delay: .3s; } .hero-more .help-line { animation-delay: .36s; }
+.hero .treeline { animation: rise .9s cubic-bezier(.2,.8,.2,1) .2s both; transform-origin: bottom; }
+@keyframes rise { from { transform: scaleY(.3); opacity: 0; } to { transform: none; opacity: .9; } }
+.front.still .hero > *, .front.still .hero .treeline { animation: none; }
+.front.still .front-card { animation-delay: 0s; animation-duration: .35s; }
+@media (prefers-reduced-motion: reduce) { .hero > *, .front-card, .hero .treeline { animation: none; } }
+@media (max-width: 900px) {
+  .front { grid-template-columns: 1fr; grid-template-areas: "top" "card" "more"; margin-top: 14px; }
+  .hero { padding: 24px 22px 0; }
+  .hero-top { border-radius: 20px; padding-bottom: 24px; background: linear-gradient(180deg, #0d361f, #1a5c33); }
+  .hero-more { background: linear-gradient(180deg, #134629, #1e6a37); }
+  .hero-more { border-radius: 20px; }
+  .front-card { padding: 16px 0; }
+  .hero h1 { font-size: 32px; }
+  .hero .lede { font-size: 15.5px; }
+  .hero .treeline { width: calc(100% + 44px); margin: 18px -22px 0; height: 56px; }
+}
+@media (max-width: 520px) { .hero .cadres { grid-template-columns: 1fr; } }
