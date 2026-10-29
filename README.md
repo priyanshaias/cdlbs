@@ -67,7 +67,7 @@ CDL+BS is separate from UPMC2 and FV. It has its own repo, Apps Script project, 
 
 ### 3. Connect the website
 1. Put the `/exec` URL in `docs/js/config.js` (`API_URL`).
-2. Push. GitHub Pages serves `docs/` from `main` (https://priyanshaias.github.io/cdlbs/). For cdl.forestwb.in: add a DNS CNAME record `cdl` → `priyanshaias.github.io`, then put `cdl.forestwb.in` in `docs/CNAME`.
+2. Push. GitHub Pages serves `docs/` from `main` at **https://cdlbs.forestwb.in** (`docs/CNAME`; DNS: CNAME `cdlbs` → `priyanshaias.github.io`).
 
 ### Changing the script later
 1. Paste the new `Code.gs` (and `appsscript.json` if it changed) and save.
