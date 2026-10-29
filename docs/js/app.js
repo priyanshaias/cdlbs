@@ -60,13 +60,13 @@
   /* ------------------------------------------------------------ login */
   function login() {
     if (S.LIVE) { authScreen(); return; }
-    app.innerHTML = front(`<div class="login card">
+    app.innerHTML = `<div class="login card">
       <h1>Sign in</h1><p class="muted">DL / CDL and Ban Sahayak details and duties, division by division.</p>
       <div class="banner info">This is the demo: the names are made up and changes stay in this browser. Choose how you want to see it.</div>
       <div class="role">
         <button class="btn primary block" data-act="as-op">Try as a division operator</button>
         <button class="btn block" data-act="as-admin">Try as an admin (Aranya Bhawan)</button>
-      </div></div>`);
+      </div></div>`;
   }
 
   /* ------------------------------------------------------------ division picker */
@@ -482,35 +482,6 @@
     setTimeout(() => { node.textContent = text; node.classList.remove('out'); }, 220);
   }
 
-  /* ------------------------------------------------------------ front page: what the app is for, beside the sign-in card */
-  const HELP = { name: 'Sudipta Kundu', office: 'Aranya Bhawan', phone: '+91 70442 30806', tel: '+917044230806' };   // the PMC helpline, as in UPMC and FV
-  const TREELINE = `<svg class="treeline" viewBox="0 0 640 90" preserveAspectRatio="none" aria-hidden="true"><path d="M0 90V70l18-26 14 20 22-40 20 34 12-16 24 34 16-22 26-46 24 42 14-18 22 30 18-26 30-50 26 46 16-20 22 34 14-18 26 40 20-30 28-48 24 44 18-24 20 30 16-20 26 38 22-34 26-44 22 40 20-26 18 28V90Z"/></svg>`;
-  let frontShown = false;   // the panel animates in once; after that only the card changes
-  function front(card) {
-    const still = frontShown; frontShown = true;
-    return `<div class="front${still ? ' still' : ''}">
-      <section class="hero hero-top">
-        <div class="eyebrow"><img src="assets/emblem.svg" alt="">Directorate of Forests · West Bengal</div>
-        <h1>CDL+BS <span>Verification and Update</span></h1>
-        <p class="lede">Check the details and duties of every DL / CDL, and add your Ban Sahayaks, division by division.</p>
-      </section>
-      <div class="front-card">${card}</div>
-      <section class="hero hero-more">
-        <div class="cadres">
-          <div class="cad"><b>DL / CDL</b><span>Already filled from the July 2026 returns. Fill what is missing and verify.</span></div>
-          <div class="cad"><b>Ban Sahayaks</b><span>Added by each division. Pay is fixed at Rs 12,000.</span></div>
-        </div>
-        <ol class="how">
-          <li><i>1</i><div><b>Sign up for your division</b>with your email. Only 1 person per division.</div></li>
-          <li><i>2</i><div><b>Fill and verify</b>each person, row by row. Orange shows what is missing.</div></li>
-          <li><i>3</i><div><b>The DFO certifies</b>the list once everyone is verified.</div></li>
-        </ol>
-        <p class="help-line">Need help? <b>${HELP.name}</b>, ${HELP.office} · <a href="tel:${HELP.tel}">${HELP.phone}</a></p>
-        ${TREELINE}
-      </section>
-    </div>`;
-  }
-
   /* ------------------------------------------------------------ sign in, sign up, forgot password (live) */
   // view: signin | signup | verify | forgot | reset; form: the sign-up details kept for "Send a new code"
   const auth = { view: 'signin', msg: '', email: '', form: null, lists: null };
@@ -522,10 +493,10 @@
       <h1>${title}</h1>${sub ? `<p class="muted">${sub}</p>` : ''}${msg}${body}
       <div class="err" id="aerr" role="alert"></div><button class="btn primary block" type="submit" id="ago">${btn}</button>`;
     if (v === 'signup') {
-      if (!auth.lists) { app.innerHTML = front(loaderHtml('signup')); animateLoader(app); S.api.open('lists').then(d => { auth.lists = d.divisions; render(); }, x => { auth.msg = ''; app.innerHTML = front(`<div class="card"><p class="muted">${esc(x.message)}</p><button class="btn primary" data-act="retry">Try again</button></div>`); }); return; }
+      if (!auth.lists) { app.innerHTML = loaderHtml('signup'); animateLoader(app); S.api.open('lists').then(d => { auth.lists = d.divisions; render(); }, x => { auth.msg = ''; app.innerHTML = `<div class="card"><p class="muted">${esc(x.message)}</p><button class="btn primary" data-act="retry">Try again</button></div>`; }); return; }
       const circles = [...new Set(auth.lists.map(d => d.circle))];
       const ff = auth.form || {};
-      app.innerHTML = front(card('Create an account', '', `
+      app.innerHTML = card('Create an account', '', `
         <div class="banner warn"><b>Only 1 person per division.</b> Please sign up for your own division.</div>
         <div class="two"><div class="field"><label for="su-circle">Circle</label><select id="su-circle"><option value="">— Choose —</option>${circles.map(c => `<option ${c === ff.circle ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
           <div class="field"><label for="su-division">Division</label><select id="su-division" ${ff.circle ? '' : 'disabled'}><option value="">— Choose —</option>${auth.lists.filter(d => d.circle === ff.circle).map(d => `<option ${d.division === ff.division ? 'selected' : ''}>${esc(d.division)}</option>`).join('')}</select></div></div>
@@ -534,26 +505,26 @@
         ${f('su-name', 'Your name', 'text', `autocomplete="name" value="${esc(ff.name || '')}"`)}
         <div class="two">${f('su-desig', 'Designation', 'text', `value="${esc(ff.desig || '')}" placeholder="e.g. Head Clerk"`)}${f('su-phone', 'Mobile number', 'tel', `autocomplete="tel" inputmode="numeric" value="${esc(ff.phone || '')}"`)}</div>
         <div class="two">${f('su-pw', 'Password <span class="faint">(8+ characters)</span>', 'password', 'autocomplete="new-password"')}${f('su-pw2', 'Password again', 'password', 'autocomplete="new-password"')}</div>`,
-        'signup', 'Send me a code') + `<p class="alt">Already have an account? <a href="#" data-act="auth" data-v="signin">Sign in</a></p></form>`);
+        'signup', 'Send me a code') + `<p class="alt">Already have an account? <a href="#" data-act="auth" data-v="signin">Sign in</a></p></form>`;
       if (ff.division) authFormChange($('#su-division'));
       return;
     }
     if (v === 'verify') {
-      app.innerHTML = front(card('Check your email', `We sent a 6-digit code to <b>${esc(auth.email)}</b>. It may be in the spam folder.`,
+      app.innerHTML = card('Check your email', `We sent a 6-digit code to <b>${esc(auth.email)}</b>. It may be in the spam folder.`,
         f('code', 'Code', 'text', 'inputmode="numeric" autocomplete="one-time-code" maxlength="6"'), 'verify', 'Create my account')
-        + `<p class="alt"><a href="#" data-act="resend">Send a new code</a> · <a href="#" data-act="auth" data-v="signup">Change the details</a></p></form>`);
+        + `<p class="alt"><a href="#" data-act="resend">Send a new code</a> · <a href="#" data-act="auth" data-v="signup">Change the details</a></p></form>`;
     } else if (v === 'forgot') {
-      app.innerHTML = front(card('Forgot password', 'We will email you a code to set a new password.', f('fg-email', 'Email you signed up with', 'email', `autocomplete="email" value="${esc(auth.email)}"`), 'forgot', 'Send me a code')
-        + `<p class="alt"><a href="#" data-act="auth" data-v="signin">Back to sign in</a></p></form>`);
+      app.innerHTML = card('Forgot password', 'We will email you a code to set a new password.', f('fg-email', 'Email you signed up with', 'email', `autocomplete="email" value="${esc(auth.email)}"`), 'forgot', 'Send me a code')
+        + `<p class="alt"><a href="#" data-act="auth" data-v="signin">Back to sign in</a></p></form>`;
     } else if (v === 'reset') {
-      app.innerHTML = front(card('Set a new password', `If <b>${esc(auth.email)}</b> has an account, a code is on its way. It may be in the spam folder.`,
+      app.innerHTML = card('Set a new password', `If <b>${esc(auth.email)}</b> has an account, a code is on its way. It may be in the spam folder.`,
         f('code', 'Code', 'text', 'inputmode="numeric" autocomplete="one-time-code" maxlength="6"') +
         `<div class="two">${f('rs-pw', 'New password <span class="faint">(8+ characters)</span>', 'password', 'autocomplete="new-password"')}${f('rs-pw2', 'New password again', 'password', 'autocomplete="new-password"')}</div>`, 'reset', 'Set the new password')
-        + `<p class="alt"><a href="#" data-act="auth" data-v="forgot">Send a new code</a> · <a href="#" data-act="auth" data-v="signin">Back to sign in</a></p></form>`);
+        + `<p class="alt"><a href="#" data-act="auth" data-v="forgot">Send a new code</a> · <a href="#" data-act="auth" data-v="signin">Back to sign in</a></p></form>`;
     } else {
-      app.innerHTML = front(card('Sign in', 'Use the email and password you signed up with.',
+      app.innerHTML = card('Sign in', 'DL / CDL and Ban Sahayak details and duties, division by division.',
         f('lu', 'Email', 'text', `autocomplete="username" autocapitalize="none" value="${esc(auth.email)}"`) + f('lp', 'Password', 'password', 'autocomplete="current-password"'), 'signin', 'Sign in')
-        + `<p class="alt"><a href="#" data-act="auth" data-v="forgot">Forgot password?</a></p><p class="alt">New here? <a href="#" data-act="auth" data-v="signup">Create an account</a></p></form>`);
+        + `<p class="alt"><a href="#" data-act="auth" data-v="forgot">Forgot password?</a></p><p class="alt">New here? <a href="#" data-act="auth" data-v="signup">Create an account</a></p></form>`;
     }
     setTimeout(() => { const i = $('form[data-auth] input'); i && i.focus(); }, 50);
   }
