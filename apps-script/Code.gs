@@ -492,13 +492,30 @@ function buildAll_() {
   return { m, by };
 }
 /** A division's line of the summary, from its people (both cadres). */
+// for the dashboard: what each division's people look like, added up (same as dashX in store.js)
+const TRACK_ = ['name', 'mode', 'agency', 'date', 'district', 'range', 'beat', 'place', 'placeName', 'duty', 'other', 'details', 'pay', 'remarks'];
+const payBand_ = n => n < 6000 ? '<6k' : n < 8000 ? '6-8k' : n < 10000 ? '8-10k' : n < 12000 ? '10-12k' : n < 15000 ? '12-15k' : n < 20000 ? '15-20k' : '20k+';
+const x0_ = () => ({ other: {}, place: {}, at: { HQ: 0, Range: 0, none: 0 }, years: {}, pay: {}, paySum: 0, payN: 0, mode: {}, miss: {}, vday: {}, changed: 0 });
+const inc_ = (o, k) => { o[k] = (o[k] || 0) + 1; };
 function summary_(rows) {
-  const o = { CDL: count0_(), BS: count0_(), last: { CDL: '', BS: '' }, duty: { CDL: {}, BS: {} }, blank: { CDL: 0, BS: 0 }, pending: 0 };
+  const o = { CDL: count0_(), BS: count0_(), last: { CDL: '', BS: '' }, duty: { CDL: {}, BS: {} }, blank: { CDL: 0, BS: 0 }, pending: 0, x: { CDL: x0_(), BS: x0_() } };
   rows.forEach(p => {
     const c = p.cadre === 'BS' ? 'BS' : 'CDL', s = status_(p); if (s === 'removed') return;
     const k = o[c]; k.all++; k[s]++; if (p.state === 'add-pending') k.added++;
     if (p.state === 'add-pending' || p.state === 'remove-pending') o.pending++;
-    if (s !== 'remove') { if (p.duty) o.duty[c][p.duty] = (o.duty[c][p.duty] || 0) + 1; else o.blank[c]++; }
+    if (s !== 'remove') {
+      if (p.duty) o.duty[c][p.duty] = (o.duty[c][p.duty] || 0) + 1; else o.blank[c]++;
+      const x = o.x[c], y = /(\d{4})$/.exec(p.date || '');
+      (p.other || []).forEach(d => inc_(x.other, d));
+      inc_(x.place, p.place || '');
+      x.at[p.range === HQ ? 'HQ' : p.range ? 'Range' : 'none']++;
+      if (y) inc_(x.years, y[1]);
+      if (p.pay) { x.paySum += p.pay; x.payN++; inc_(x.pay, payBand_(p.pay)); }
+      inc_(x.mode, p.mode || '');
+      missing_(p).forEach(f => inc_(x.miss, f));
+      if (p.ver && p.updOn) inc_(x.vday, p.updOn.slice(0, 10));
+      if (p.orig && TRACK_.some(f => show_(f, p.orig[f]) !== show_(f, p[f]))) x.changed++;
+    }
     if (sortKey_(p.updOn) > sortKey_(o.last[c])) o.last[c] = p.updOn;
   });
   ['CDL', 'BS'].forEach(c => { o[c].active = o[c].all - o[c].remove; });
@@ -550,7 +567,7 @@ function meta_(body, user) {
     ['CDL', 'BS'].forEach(c => { blank[c] += d.blank[c]; Object.keys(d.duty[c]).forEach(k => { duty[c][k] = (duty[c][k] || 0) + d.duty[c][k]; }); });
   });
   const out = { user, certs: m.certs, duty, blank, pending,
-    divisions: m.divisions.map(d => ({ circle: d.circle, division: d.division, CDL: d.CDL, BS: d.BS, last: d.last })) };
+    divisions: m.divisions.map(d => ({ circle: d.circle, division: d.division, CDL: d.CDL, BS: d.BS, last: d.last, duty: d.duty, blank: d.blank, x: d.x })) };
   if (user.isAdmin) { out.userCounts = {}; readUsers_().rows.forEach(r => { if (!r.role && r.status === 'Active') out.userCounts[r.division] = (out.userCounts[r.division] || 0) + 1; }); }
   return out;
 }

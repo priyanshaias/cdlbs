@@ -282,6 +282,42 @@
 
   function signIn(u) { st.user = u; save(); if (LIVE) fromDevice(); }
   function signOut() { if (LIVE) { try { localStorage.removeItem(DKEY()); } catch (e) { /* fine */ } API.signOut(); load(); return; } st.user = null; save(); }
+  /**
+   * Dashboard: every division with its counts and figures for both cadres (same shape as summary_ in Code.gs).
+   * Live: from the API's summary. Demo: added up here.
+   */
+  const payBand = n => n < 6000 ? '<6k' : n < 8000 ? '6-8k' : n < 10000 ? '8-10k' : n < 12000 ? '10-12k' : n < 15000 ? '12-15k' : n < 20000 ? '15-20k' : '20k+';
+  const x0 = () => ({ other: {}, place: {}, at: { HQ: 0, Range: 0, none: 0 }, years: {}, pay: {}, paySum: 0, payN: 0, mode: {}, miss: {}, vday: {}, changed: 0 });
+  const inc = (o, k) => { o[k] = (o[k] || 0) + 1; };
+  function dashX(rows) {
+    const o = { duty: { CDL: {}, BS: {} }, blank: { CDL: 0, BS: 0 }, x: { CDL: x0(), BS: x0() } };
+    rows.forEach(p => {
+      const c = p.cadre === 'BS' ? 'BS' : 'CDL', st = status(p); if (st === 'removed' || st === 'remove') return;
+      const x = o.x[c], y = /(\d{4})$/.exec(p.date || '');
+      if (p.duty) inc(o.duty[c], p.duty); else o.blank[c]++;
+      (p.other || []).forEach(d => inc(x.other, d));
+      inc(x.place, p.place || '');
+      x.at[p.range === HQ ? 'HQ' : p.range ? 'Range' : 'none']++;
+      if (y) inc(x.years, y[1]);
+      if (p.pay) { x.paySum += p.pay; x.payN++; inc(x.pay, payBand(p.pay)); }
+      inc(x.mode, p.mode || '');
+      missing(p).forEach(f => inc(x.miss, f));
+      if (p.ver && p.updOn) inc(x.vday, p.updOn.slice(0, 10));
+      if (changed(p).length) x.changed++;
+    });
+    return o;
+  }
+  function dashData() {
+    if (LIVE) {
+      if (!st.meta) return [];
+      return st.meta.divisions.map(d => Object.assign({ x: { CDL: x0(), BS: x0() }, duty: { CDL: {}, BS: {} }, blank: { CDL: 0, BS: 0 } }, d, {
+        certs: { CDL: st.meta.certs[d.division + '|CDL'] || null, BS: st.meta.certs[d.division + '|BS'] || null },
+        users: st.meta.userCounts ? st.meta.userCounts[d.division] || 0 : null }));
+    }
+    return divisions('CDL').map(d => Object.assign({ circle: d.circle, division: d.division, CDL: counts(people(d.division, 'CDL')), BS: counts(people(d.division, 'BS')),
+      last: { CDL: d.last, BS: '' }, certs: { CDL: st.certified[ck(d.division, 'CDL')] || null, BS: st.certified[ck(d.division, 'BS')] || null }, users: null },
+      dashX(people(d.division, null))));
+  }
   /** People working by main duty: counted here in the demo, by the API when live. */
   function dutyCounts(cadre) {
     if (LIVE) return { duty: (st.meta && st.meta.duty[cadre]) || {}, blank: (st.meta && st.meta.blank[cadre]) || 0 };
@@ -291,7 +327,7 @@
   }
 
   load();
-  window.CDL_STORE = { LIVE, loadDivision, loadMeta, loadPending, loadLog, dutyCounts,
+  window.CDL_STORE = { LIVE, loadDivision, loadMeta, loadPending, loadLog, dutyCounts, dashData,
     isLoaded: div => !LIVE || !!st.loaded[div], loadedAt: div => st.loaded && st.loaded[div] || 0, get meta() { return LIVE ? st.meta : true; },
     get metaAt() { return LIVE ? st.metaAt : Date.now(); },
     get pendingLoaded() { return !LIVE || !!st.pendingRows; }, get logLoaded() { return !LIVE || !!st.logAt; }, api: API, get saving() { return waiting; },
