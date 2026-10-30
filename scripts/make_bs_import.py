@@ -93,6 +93,10 @@ for r in sh.iter_rows(min_row=1):   # plain text, so dates stay as written
     for c in r: c.number_format = '@'
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 wb.save(OUT)
+# Google Sheets can append only a CSV to an existing tab (File > Import > "Append to current sheet")
+import csv
+with open(OUT[:-5] + '.csv', 'w', newline='', encoding='utf-8') as f:
+    csv.writer(f).writerows([[('' if c is None else str(c)) for c in r] for r in sh.iter_rows(values_only=True)])
 
 by = Counter(o['division'] for o in out)
 print(len(out), 'Ban Sahayaks in', len(by), 'divisions ->', os.path.normpath(OUT))
