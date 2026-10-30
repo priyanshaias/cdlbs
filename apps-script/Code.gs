@@ -13,7 +13,7 @@
 const CONFIG = { TZ: 'Asia/Kolkata', PROP: 'CDLBS_SHEET_ID', TAB: { CDL: 'DL-CDL', BS: 'Ban Sahayak' }, LOG: 'Change Log', CERT: 'Certificates', LISTS: 'Lists', USERS: 'Users' };
 const SESSION_HOURS = 6, MAX_FAILS = 5, LOCK_MIN = 15, CACHE_SEC = 6 * 3600, CODE_MIN = 30;
 const APP_NAME = 'CDL+BS Verification and Update';
-const USER_HEADERS = ['Email', 'Circle', 'Division', 'Name', 'Designation', 'Phone', 'Status', 'Signed up on', 'Last sign-in', 'Password', 'Role'];
+const USER_HEADERS = ['Email', 'Circle', 'Division', 'Name', 'Designation', 'Phone', 'Status', 'Signed up on', 'Last sign-in', 'Password', 'Role', 'Email confirmed'];
 
 // [key, sheet header]; the order is the column order of both people tabs. Columns are found by heading, so moving one is safe.
 const COLS = [
@@ -55,7 +55,7 @@ function doPost(e) {
     const body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     if (body.action === 'logout') { logout_(body.token); return json_({ ok: true, data: {} }); }
     // before sign-in
-    const open = { login: login_, lists: lists_, divisionUsers: divisionUsers_, signupStart: signupStart_, signupVerify: signupVerify_,
+    const open = { login: login_, lists: lists_, divisionUsers: divisionUsers_, signupStart: signupStart_, signupVerify: signupVerify_, signupSkip: signupSkip_,
       forgotStart: forgotStart_, forgotVerify: forgotVerify_ };
     if (open[body.action]) return json_({ ok: true, data: open[body.action](body) });
     const user = authenticate_(body.token);
@@ -131,7 +131,7 @@ function mayEdit_(user, division) {
 
 /* ============================================================ sign-up, password reset, users */
 
-const USER_KEYS = ['email', 'circle', 'division', 'name', 'desig', 'phone', 'status', 'on', 'last', 'password', 'role'];
+const USER_KEYS = ['email', 'circle', 'division', 'name', 'desig', 'phone', 'status', 'on', 'last', 'password', 'role', 'confirmed'];
 /** The Users tab (sheets made before plain passwords had Salt and Password hash columns: they are replaced). */
 function readUsers_() {
   const sh = tab_(CONFIG.USERS);
@@ -142,6 +142,10 @@ function readUsers_() {
     sh.getRange(1, 1, 1, USER_HEADERS.length).setValues([USER_HEADERS]).setFontWeight('bold');
     if (v.length > 1) sh.getRange(2, 10, v.length - 1, Math.max(2, head.length - 9)).clearContent();   // old salt and hash
     v = sh.getDataRange().getValues(); head = USER_HEADERS.slice();
+  }
+  if (head.indexOf('Email confirmed') < 0) {   // tabs made before "Skip for now"
+    sh.getRange(1, head.length + 1).setValue('Email confirmed').setFontWeight('bold');
+    head.push('Email confirmed');
   }
   const at = k => head.indexOf(k), rows = [];
   for (let r = 1; r < v.length; r++) {
@@ -199,20 +203,33 @@ function signupStart_(body) {
   if (local_().accounts[email] || readUsers_().rows.some(r => r.email === email)) throw new Error('This email already has an account. Sign in, or use "Forgot password".');
   const code = code6_();
   CacheService.getScriptCache().put('su|' + email, JSON.stringify({ code, user: { email, circle: div.circle, division: div.division, name, desig, phone, password } }), CODE_MIN * 60);
-  mail_(email, APP_NAME + ': your sign-up code', 'Your sign-up code is ' + code + '.\nIt is valid for ' + CODE_MIN + ' minutes.\n\nDivision: ' + div.division + '\n\nIf you did not sign up, ignore this email.');
+  // if the email cannot be sent (daily limit, bad address), the person can still "Skip for now"
+  try { mail_(email, APP_NAME + ': your sign-up code', 'Your sign-up code is ' + code + '.\nIt is valid for ' + CODE_MIN + ' minutes.\n\nDivision: ' + div.division + '\n\nIf you did not sign up, ignore this email.'); }
+  catch (e) { return { sent: false }; }
   return { sent: true };
 }
-/** Step 2 of sign-up: the code from the email creates the account and signs in. */
-function signupVerify_(body) {
-  const email = cleanEmail_(body.email), u = takeCode_('su|' + email, body.code).user;
+/** Creates the account from the details kept by signupStart_. confirmed: the emailed code was entered. */
+function createUser_(email, u, confirmed) {
   const lock = LockService.getScriptLock(); lock.waitLock(20000);
   try {
     const t = readUsers_();
     if (t.rows.some(r => r.email === email)) throw new Error('This email already has an account. Please sign in.');
     putUser_(t, email, { 'Circle': u.circle, 'Division': u.division, 'Name': u.name, 'Designation': u.desig, 'Phone': u.phone, 'Status': 'Active',
-      'Signed up on': now_(), 'Last sign-in': now_(), 'Password': u.password });
+      'Signed up on': now_(), 'Last sign-in': now_(), 'Password': u.password, 'Email confirmed': confirmed ? 'Yes' : 'No' });
   } finally { lock.releaseLock(); }
   return session_(userOf_(u));
+}
+/** "Skip for now": the account is made without the code; the Users page shows its email as not confirmed. */
+function signupSkip_(body) {
+  const email = cleanEmail_(body.email), s = CacheService.getScriptCache().get('su|' + email);
+  if (!s) throw new Error('Please fill the sign-up form again.');
+  CacheService.getScriptCache().remove('su|' + email);
+  return createUser_(email, JSON.parse(s).user, false);
+}
+/** Step 2 of sign-up: the code from the email creates the account and signs in. */
+function signupVerify_(body) {
+  const email = cleanEmail_(body.email);
+  return createUser_(email, takeCode_('su|' + email, body.code).user, true);
 }
 /** Forgot password, step 1: emails a code if the account exists (the answer is the same either way). */
 function forgotStart_(body) {
@@ -231,6 +248,7 @@ function forgotVerify_(body) {
   const email = cleanEmail_(body.email), pw = pwCheck_(body.password);
   takeCode_('rs|' + email, body.code);
   setPassword_(email, pw);
+  const t = readUsers_(); if (t.rows.some(x => x.email === email && x.confirmed === 'No')) putUser_(t, email, { 'Email confirmed': 'Yes' });   // the code reached them
   CacheService.getScriptCache().remove('fail_' + email);
   return { done: true };
 }
@@ -254,7 +272,7 @@ function setPassword_(u, pw) {
 function users_() {
   const all = readUsers_().rows, accs = local_().accounts, props = PropertiesService.getScriptProperties();
   const rows = all.filter(r => !r.role && !accs[r.email]).map(r => ({ email: r.email, circle: r.circle, division: r.division, name: r.name, desig: r.desig, phone: r.phone,
-    status: r.status, on: r.on, last: r.last, password: r.password }));
+    status: r.status, on: r.on, last: r.last, password: r.password, confirmed: r.confirmed !== 'No' }));
   const accounts = Object.keys(accs).map(u => {
     const r = all.find(x => x.email === u) || {};
     return { username: u, name: accs[u].name || u, role: accs[u].role === 'admin' ? 'admin' : 'operator', password: r.password || '',

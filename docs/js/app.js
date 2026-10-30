@@ -510,9 +510,12 @@
       return;
     }
     if (v === 'verify') {
-      app.innerHTML = card('Check your email', `We sent a 6-digit code to <b>${esc(auth.email)}</b>. It may be in the spam folder.`,
+      app.innerHTML = card('Check your email', auth.unsent ? `We could not send the code to <b>${esc(auth.email)}</b>. Check the email address, or skip this step.`
+          : `We sent a 6-digit code to <b>${esc(auth.email)}</b>. It may be in the spam folder.`,
         f('code', 'Code', 'text', 'inputmode="numeric" autocomplete="one-time-code" maxlength="6"'), 'verify', 'Create my account')
-        + `<p class="alt"><a href="#" data-act="resend">Send a new code</a> · <a href="#" data-act="auth" data-v="signup">Change the details</a></p></form>`;
+        + `<button type="button" class="btn block skip" data-act="skip-code">Skip for now</button>
+        <p class="faint" style="margin:8px 0 0;text-align:center">You can use the app without the code. Only “Forgot password” needs a working email.</p>
+        <p class="alt"><a href="#" data-act="resend">Send a new code</a> · <a href="#" data-act="auth" data-v="signup">Change the details</a></p></form>`;
     } else if (v === 'forgot') {
       app.innerHTML = card('Forgot password', 'We will email you a code to set a new password.', f('fg-email', 'Email you signed up with', 'email', `autocomplete="email" value="${esc(auth.email)}"`), 'forgot', 'Send me a code')
         + `<p class="alt"><a href="#" data-act="auth" data-v="signin">Back to sign in</a></p></form>`;
@@ -542,7 +545,7 @@
     }, () => {});
   }
   async function authSubmit(form, how) {
-    const v = how === 'resend' ? 'signup' : form.dataset.auth, er = $('#aerr'), go = $('#ago');
+    const v = how === 'resend' ? 'signup' : how === 'skip' ? 'skip' : form.dataset.auth, er = $('#aerr'), go = how === 'skip' ? $('.skip') : $('#ago');
     const val = id => ($('#' + id) || {}).value || '';
     const busy = (on, text) => { if (go) { go.disabled = on; if (text) go.textContent = text; } };
     if (er) er.textContent = '';
@@ -562,8 +565,13 @@
           if (ff.password !== val('su-pw2')) throw new Error('The two passwords are not the same.');
           auth.pw = ff.password;
         }
-        await S.api.open('signupStart', Object.assign({}, ff, { password: auth.pw }));
+        const r = await S.api.open('signupStart', Object.assign({}, ff, { password: auth.pw }));
+        auth.unsent = r && r.sent === false;
         auth.email = ff.email; auth.view = 'verify'; auth.msg = how === 'resend' ? 'A new code has been sent.' : ''; render(); return;
+      }
+      if (v === 'skip') {
+        const d = await S.api.open('signupSkip', { email: auth.email });
+        auth.pw = ''; auth.form = null; toast('Welcome! Your account is ready.'); signedIn(d.user); return;
       }
       if (v === 'verify') {
         const d = await S.api.open('signupVerify', { email: auth.email, code: val('code') });
@@ -615,7 +623,7 @@
           <td><span class="ucount ${n === 0 ? 'zero' : n > 1 ? 'many' : 'one'}">${n}</span>${n > 1 ? ' <span class="faint">more than 1</span>' : ''}</td>
           <td>${list.length ? list.map(u => `${esc(u.name)} <span class="faint">${esc(u.desig)}${u.status !== 'Active' ? ' · disabled' : ''}</span>`).join('<br>') : '<span class="faint">No one has signed up yet</span>'}</td></tr>
           ${open ? list.map(u => `<tr class="u-detail"><td colspan="3"><div class="row" style="justify-content:space-between;align-items:flex-start">
-            <div><b>${esc(u.name)}</b>, ${esc(u.desig)} ${u.status === 'Active' ? '<span class="pill confirmed">Active</span>' : '<span class="pill remove">Disabled</span>'}
+            <div><b>${esc(u.name)}</b>, ${esc(u.desig)} ${u.status === 'Active' ? '<span class="pill confirmed">Active</span>' : '<span class="pill remove">Disabled</span>'}${u.confirmed === false ? ' <span class="pill missing">Email not confirmed</span>' : ''}
               <div class="faint">${esc(u.email)} · ${esc(u.phone)} · password ${pwCell(u.password) || 'not set'} · signed up ${esc(u.on)} · last sign-in ${esc(u.last || '—')}</div></div>
             <div class="row" style="flex-wrap:nowrap">${u.status === 'Active' ? `<button class="btn sm danger" data-act="u-status" data-v="off" data-email="${esc(u.email)}">Disable</button>` : `<button class="btn sm" data-act="u-status" data-v="on" data-email="${esc(u.email)}">Enable</button>`}
               <button class="btn sm" data-act="u-pass" data-email="${esc(u.email)}">Set a new password</button></div></div></td></tr>`).join('') : ''}`;
@@ -642,7 +650,7 @@
     const list = usersData.rows.slice().sort((a, b) => when(b.on).localeCompare(when(a.on)));
     if (!list.length) return '<div class="card"><p class="muted" style="margin:0">No one has signed up yet.</p></div>';
     return `<div class="card"><div style="overflow-x:auto"><table class="plain"><thead><tr><th>Name</th><th>Division</th><th>Email · Mobile</th><th>Password</th><th>Signed up</th><th>Last sign-in</th><th></th></tr></thead><tbody>
-      ${list.map(u => `<tr><td><b>${esc(u.name)}</b><div class="faint">${esc(u.desig)}</div></td><td>${esc(u.division)}<div class="faint">${esc(u.circle)}</div></td>
+      ${list.map(u => `<tr><td><b>${esc(u.name)}</b><div class="faint">${esc(u.desig)}</div>${u.confirmed === false ? '<span class="pill missing">Email not confirmed</span>' : ''}</td><td>${esc(u.division)}<div class="faint">${esc(u.circle)}</div></td>
         <td>${esc(u.email)}<div class="faint">${esc(u.phone)}</div></td><td>${pwCell(u.password) || '<span class="faint">not set</span>'}</td><td class="faint">${esc(u.on)}</td><td class="faint">${esc(u.last || '—')}</td>
         <td><div class="row" style="flex-wrap:nowrap">${u.status === 'Active' ? `<button class="btn sm danger" data-act="u-status" data-v="off" data-email="${esc(u.email)}">Disable</button>` : `<button class="btn sm" data-act="u-status" data-v="on" data-email="${esc(u.email)}">Enable</button>`}
           <button class="btn sm" data-act="u-pass" data-email="${esc(u.email)}">Set password</button></div></td></tr>`).join('')}</tbody></table></div></div>`;
@@ -804,6 +812,7 @@
       case 'retry': render(); break;
       case 'auth': e.preventDefault(); auth.view = t.dataset.v; auth.msg = ''; render(); break;
       case 'resend': e.preventDefault(); authSubmit(null, 'resend'); break;
+      case 'skip-code': authSubmit(null, 'skip'); break;
       case 'u-showpw': usersUi.showPw = !usersUi.showPw; render(); break;
       case 'u-filter': usersUi.filter = t.dataset.v; render(); break;
       case 'u-open': usersUi.open = usersUi.open === t.dataset.v ? '' : t.dataset.v; render(); break;
