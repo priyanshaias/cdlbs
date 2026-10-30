@@ -14,7 +14,7 @@ CDL+BS is separate from UPMC2 and FV. It has its own repo, Apps Script project, 
   - The sign-up page says *"Only 1 person per division. Please sign up for your own division."* If the division already has a user, it warns but still allows a second person.
   - A 6-digit code is emailed (Apps Script MailApp, from the Google account that owns the script). Codes last 30 minutes; five wrong tries and the code is gone. **Skip for now** creates the account without the code; the Users page then shows *Email not confirmed* (a later "Forgot password" code that reaches them confirms it).
   - **Forgot password** emails a code in the same way.
-  - Passwords are kept as plain text in the **Users** tab, so an admin can see and set any of them (**Show passwords** on the Users page). Keep the sheet private. Five wrong sign-ins lock that email for 15 minutes.
+  - Passwords are kept as plain text in the **Users** tab, so an admin can see and set any of them (shown on the Users page). Keep the sheet private. Five wrong sign-ins lock that email for 15 minutes.
 - **A division user can change only their own division.** They can look at others. The API enforces this, not just the screen.
 - **Admins** are in the private `Config.local.gs`, with the same usernames and passwords as UPMC2 and FV, and sign in with their username. Their **Users** page shows the users in each division (divisions with none are marked, as are those with more than 1). From there they can disable or enable a user (a disabled user is signed out at once) and set a new password. The Dashboard shows **Divisions with a user**.
 - Every change in the Change Log records the user's name, designation and division.

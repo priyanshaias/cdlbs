@@ -599,7 +599,7 @@
 
   /* ------------------------------------------------------------ admin: users */
   let usersData = null;
-  const usersUi = { filter: 'everyone', open: '', showPw: false };
+  const usersUi = { filter: 'everyone', open: '' };
   async function loadUsers() { usersData = await S.api.call('users'); }
   function usersPage() {
     const by = {}; usersData.rows.forEach(u => (by[u.division] = by[u.division] || []).push(u));
@@ -614,7 +614,7 @@
         <div class="kpi"><div class="v num" style="color:var(--warn-ink)">${none.length}</div><div class="l">Divisions with no user</div></div>
         <div class="kpi"><div class="v num">${many.length}</div><div class="l">Divisions with more than 1</div></div></div>
       ${accountsCard()}
-      <div class="chips"><button class="chip ${usersUi.showPw ? 'on' : ''}" data-act="u-showpw" style="margin-right:8px">${usersUi.showPw ? 'Hide passwords' : 'Show passwords'}</button>${chip('everyone', 'Every division user', usersData.rows.length)}${chip('all', 'By division', ds.length)}${chip('none', 'No user yet', none.length)}${chip('many', 'More than 1', many.length)}</div>
+      <div class="chips">${chip('everyone', 'Every division user', usersData.rows.length)}${chip('all', 'By division', ds.length)}${chip('none', 'No user yet', none.length)}${chip('many', 'More than 1', many.length)}</div>
       ${usersUi.filter === 'everyone' ? everyoneCard() : `
       <div class="card"><div style="overflow-x:auto"><table class="plain users"><thead><tr><th>Division</th><th>Users</th><th>Who</th></tr></thead><tbody>
       ${show.map(d => {
@@ -629,7 +629,7 @@
               <button class="btn sm" data-act="u-pass" data-email="${esc(u.email)}">Set a new password</button></div></div></td></tr>`).join('') : ''}`;
       }).join('')}</tbody></table></div></div>`}`;
   }
-  const pwCell = pw => pw ? (usersUi.showPw ? `<code class="pw">${esc(pw)}</code>` : '<span class="faint">••••••••</span>') : '';
+  const pwCell = pw => pw ? `<code class="pw">${esc(pw)}</code>` : '';   // shown as written, for the admin to read out
   // admins and shared accounts from Config.local.gs
   function accountsCard() {
     const list = usersData.accounts || [];
@@ -813,7 +813,6 @@
       case 'auth': e.preventDefault(); auth.view = t.dataset.v; auth.msg = ''; render(); break;
       case 'resend': e.preventDefault(); authSubmit(null, 'resend'); break;
       case 'skip-code': authSubmit(null, 'skip'); break;
-      case 'u-showpw': usersUi.showPw = !usersUi.showPw; render(); break;
       case 'u-filter': usersUi.filter = t.dataset.v; render(); break;
       case 'u-open': usersUi.open = usersUi.open === t.dataset.v ? '' : t.dataset.v; render(); break;
       case 'u-status': userStatus(t.dataset.email, t.dataset.v === 'on'); break;
